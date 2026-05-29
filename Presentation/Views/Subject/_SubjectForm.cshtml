@@ -1,0 +1,13 @@
+@model SubjectFormViewModel
+
+<div class="mb-3">
+    <label asp-for="Name" class="form-label"></label>
+    <input asp-for="Name" class="form-control" placeholder="VD: Lập trình web với ASP.NET Core" />
+    <span asp-validation-for="Name" class="text-danger"></span>
+</div>
+
+<div class="mb-4">
+    <label asp-for="Description" class="form-label"></label>
+    <textarea asp-for="Description" class="form-control" rows="4" placeholder="Mô tả ngắn về môn học"></textarea>
+    <span asp-validation-for="Description" class="text-danger"></span>
+</div>

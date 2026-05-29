@@ -1,0 +1,73 @@
+@model SubjectIndexViewModel
+
+@{
+    ViewData["Title"] = "Môn học";
+}
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+    <div>
+        <h1 class="display-6 mb-0">Quản lý môn học</h1>
+        <p class="text-muted mb-0">Mỗi người dùng chỉ nhìn thấy môn học do chính mình tạo.</p>
+    </div>
+    <a class="btn btn-primary" asp-action="Create">Tạo môn học</a>
+</div>
+
+@if (TempData["SuccessMessage"] is string successMessage)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (TempData["ErrorMessage"] is string errorMessage)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Môn học</th>
+                    <th>Mô tả</th>
+                    <th>Số chương</th>
+                    <th>Số tài liệu</th>
+                    <th>Ngày tạo</th>
+                    <th class="text-end">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Subjects.Count == 0)
+            {
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-5">
+                        Chưa có môn học nào. Hãy tạo môn học đầu tiên trước khi tải tài liệu lên.
+                    </td>
+                </tr>
+            }
+            else
+            {
+                foreach (var subject in Model.Subjects)
+                {
+                    <tr>
+                        <td class="fw-semibold">@subject.Name</td>
+                        <td>@(subject.Description ?? "Chưa có mô tả")</td>
+                        <td>@subject.ChapterCount</td>
+                        <td>@subject.DocumentCount</td>
+                        <td>@subject.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="text-end">
+                            <div class="d-inline-flex gap-2">
+                                <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@subject.SubjectId">Chi tiết</a>
+                                <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@subject.SubjectId">Sửa</a>
+                                <form asp-action="Delete" asp-route-id="@subject.SubjectId" method="post"
+                                      onsubmit="return confirm('Xóa môn học này? Chỉ xóa được khi môn học chưa có chương hoặc tài liệu.');">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

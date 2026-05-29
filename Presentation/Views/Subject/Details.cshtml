@@ -1,0 +1,82 @@
+@model SubjectDetailsViewModel
+
+@{
+    ViewData["Title"] = Model.Subject.Name;
+}
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+    <div>
+        <a asp-action="Index" class="text-decoration-none">&larr; Quay lại danh sách môn học</a>
+        <h1 class="display-6 mt-2 mb-0">@Model.Subject.Name</h1>
+        <p class="text-muted mb-0">@(Model.Subject.Description ?? "Chưa có mô tả")</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Edit" asp-route-id="@Model.Subject.SubjectId">Sửa môn học</a>
+        <a class="btn btn-primary" asp-action="CreateChapter" asp-route-subjectId="@Model.Subject.SubjectId">Tạo chương</a>
+    </div>
+</div>
+
+@if (TempData["SuccessMessage"] is string successMessage)
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (TempData["ErrorMessage"] is string errorMessage)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold">Danh sách chương</div>
+    <div class="table-responsive">
+        <table class="table align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Chương</th>
+                    <th>Mô tả</th>
+                    <th>Số tài liệu</th>
+                    <th>Ngày tạo</th>
+                    <th class="text-end">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Subject.Chapters.Count == 0)
+            {
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-5">
+                        Môn học này chưa có chương. Hãy tạo chương trước khi tải tài liệu lên.
+                    </td>
+                </tr>
+            }
+            else
+            {
+                foreach (var chapter in Model.Subject.Chapters)
+                {
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">Chương @chapter.ChapterNumber: @chapter.Title</div>
+                        </td>
+                        <td>@(chapter.Description ?? "Chưa có mô tả")</td>
+                        <td>@chapter.DocumentCount</td>
+                        <td>@chapter.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="text-end">
+                            <div class="d-inline-flex gap-2">
+                                <a class="btn btn-sm btn-outline-primary"
+                                   asp-controller="Document"
+                                   asp-action="Index"
+                                   asp-route-subjectId="@Model.Subject.SubjectId"
+                                   asp-route-chapterId="@chapter.ChapterId">Tài liệu</a>
+                                <a class="btn btn-sm btn-outline-secondary" asp-action="EditChapter" asp-route-id="@chapter.ChapterId">Sửa</a>
+                                <form asp-action="DeleteChapter" asp-route-id="@chapter.ChapterId" asp-route-subjectId="@Model.Subject.SubjectId" method="post"
+                                      onsubmit="return confirm('Xóa chương này? Chỉ xóa được khi chương chưa có tài liệu.');">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

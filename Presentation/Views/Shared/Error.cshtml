@@ -1,0 +1,25 @@
+﻿@model ErrorViewModel
+@{
+    ViewData["Title"] = "Lỗi";
+}
+
+<h1 class="text-danger">Lỗi.</h1>
+<h2 class="text-danger">Đã xảy ra lỗi khi xử lý yêu cầu của bạn.</h2>
+
+@if (Model.ShowRequestId)
+{
+    <p>
+        <strong>Mã yêu cầu:</strong> <code>@Model.RequestId</code>
+    </p>
+}
+
+<h3>Chế độ phát triển</h3>
+<p>
+    Chuyển sang môi trường <strong>Development</strong> sẽ hiển thị thêm thông tin chi tiết về lỗi đã xảy ra.
+</p>
+<p>
+    <strong>Không nên bật môi trường Development cho ứng dụng đã triển khai.</strong>
+    Việc này có thể làm lộ thông tin nhạy cảm từ exception cho người dùng cuối.
+    Khi debug local, hãy bật môi trường <strong>Development</strong> bằng cách đặt biến môi trường <strong>ASPNETCORE_ENVIRONMENT</strong> thành <strong>Development</strong>
+    rồi khởi động lại ứng dụng.
+</p>
