@@ -12,7 +12,6 @@
     </div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-secondary" asp-action="Edit" asp-route-id="@Model.Subject.SubjectId">Sửa môn học</a>
-        <a class="btn btn-primary" asp-action="CreateChapter" asp-route-subjectId="@Model.Subject.SubjectId">Tạo chương</a>
     </div>
 </div>
 
@@ -44,7 +43,7 @@
             {
                 <tr>
                     <td colspan="5" class="text-center text-muted py-5">
-                        Môn học này chưa có chương. Hãy tạo chương trước khi tải tài liệu lên.
+                        Môn học này chưa có chương. Chương sẽ được tạo khi bạn tải tài liệu lên.
                     </td>
                 </tr>
             }
@@ -53,25 +52,29 @@
                 foreach (var chapter in Model.Subject.Chapters)
                 {
                     <tr>
-                        <td>
-                            <div class="fw-semibold">Chương @chapter.ChapterNumber: @chapter.Title</div>
-                        </td>
+                        <td class="fw-semibold">@chapter.Title</td>
                         <td>@(chapter.Description ?? "Chưa có mô tả")</td>
                         <td>@chapter.DocumentCount</td>
                         <td>@chapter.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
                         <td class="text-end">
-                            <div class="d-inline-flex gap-2">
-                                <a class="btn btn-sm btn-outline-primary"
-                                   asp-controller="Document"
-                                   asp-action="Index"
-                                   asp-route-subjectId="@Model.Subject.SubjectId"
-                                   asp-route-chapterId="@chapter.ChapterId">Tài liệu</a>
-                                <a class="btn btn-sm btn-outline-secondary" asp-action="EditChapter" asp-route-id="@chapter.ChapterId">Sửa</a>
-                                <form asp-action="DeleteChapter" asp-route-id="@chapter.ChapterId" asp-route-subjectId="@Model.Subject.SubjectId" method="post"
-                                      onsubmit="return confirm('Xóa chương này? Chỉ xóa được khi chương chưa có tài liệu.');">
+                            @if (chapter.DocumentCount == 0)
+                            {
+                                <form asp-action="DeleteChapter"
+                                      asp-route-subjectId="@Model.Subject.SubjectId"
+                                      asp-route-chapterId="@chapter.ChapterId"
+                                      method="post"
+                                      class="d-inline"
+                                      onsubmit="return confirm('Xóa chương này?');">
                                     <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
                                 </form>
-                            </div>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-danger" type="button" disabled
+                                        title="Hãy xóa tài liệu trong chương trước.">
+                                    Xóa
+                                </button>
+                            }
                         </td>
                     </tr>
                 }

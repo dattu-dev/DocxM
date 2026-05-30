@@ -136,6 +136,46 @@ public sealed class DocumentRepository : IDocumentRepository
                 cancellationToken);
     }
 
+    public async Task<Chapter> GetOrCreateChapterAsync(
+        int subjectId,
+        int userId,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedTitle = title.Trim();
+
+        Chapter? existingChapter = await _context.Chapters
+            .Include(chapter => chapter.Subject)
+            .FirstOrDefaultAsync(
+                chapter => chapter.SubjectId == subjectId &&
+                           chapter.Subject.CreatedByUserId == userId &&
+                           chapter.Title == normalizedTitle,
+                cancellationToken);
+
+        if (existingChapter is not null)
+        {
+            return existingChapter;
+        }
+
+        int? maxChapterNumber = await _context.Chapters
+            .Where(chapter => chapter.SubjectId == subjectId)
+            .MaxAsync(chapter => (int?)chapter.ChapterNumber, cancellationToken);
+
+        int chapterNumber = (maxChapterNumber ?? 0) + 1;
+        var chapter = new Chapter
+        {
+            SubjectId = subjectId,
+            Title = normalizedTitle,
+            ChapterNumber = chapterNumber,
+            SortOrder = chapterNumber,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _context.Chapters.AddAsync(chapter, cancellationToken);
+
+        return chapter;
+    }
+
     public async Task AddDocumentAsync(Document document, CancellationToken cancellationToken = default)
     {
         await _context.Documents.AddAsync(document, cancellationToken);

@@ -159,142 +159,15 @@ public sealed class SubjectController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    public async Task<IActionResult> CreateChapter(int subjectId, CancellationToken cancellationToken)
-    {
-        SubjectDetailsDto? subject = await _subjectService.GetSubjectDetailsAsync(
-            subjectId,
-            GetCurrentUserId(),
-            cancellationToken);
-
-        if (subject is null)
-        {
-            return NotFound();
-        }
-
-        return View(new ChapterFormViewModel
-        {
-            SubjectId = subject.SubjectId,
-            SubjectName = subject.Name
-        });
-    }
-
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> CreateChapter(
-        ChapterFormViewModel viewModel,
-        CancellationToken cancellationToken)
-    {
-        if (!ModelState.IsValid)
-        {
-            await PopulateSubjectNameAsync(viewModel, cancellationToken);
-            return View(viewModel);
-        }
-
-        try
-        {
-            await _subjectService.CreateChapterAsync(
-                new ChapterUpsertDto(
-                    null,
-                    viewModel.SubjectId,
-                    GetCurrentUserId(),
-                    viewModel.Title,
-                    viewModel.Description),
-                cancellationToken);
-
-            TempData["SuccessMessage"] = "Đã tạo chương.";
-
-            return RedirectToAction(nameof(Details), new { id = viewModel.SubjectId });
-        }
-        catch (BusinessValidationException ex)
-        {
-            AddValidationErrors(ex);
-            await PopulateSubjectNameAsync(viewModel, cancellationToken);
-
-            return View(viewModel);
-        }
-    }
-
-    public async Task<IActionResult> EditChapter(int id, CancellationToken cancellationToken)
-    {
-        ChapterListItemDto? chapter = await _subjectService.GetChapterAsync(
-            id,
-            GetCurrentUserId(),
-            cancellationToken);
-
-        if (chapter is null)
-        {
-            return NotFound();
-        }
-
-        SubjectDetailsDto? subject = await _subjectService.GetSubjectDetailsAsync(
-            chapter.SubjectId,
-            GetCurrentUserId(),
-            cancellationToken);
-
-        return View(new ChapterFormViewModel
-        {
-            ChapterId = chapter.ChapterId,
-            SubjectId = chapter.SubjectId,
-            SubjectName = subject?.Name,
-            Title = chapter.Title,
-            Description = chapter.Description
-        });
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> EditChapter(
-        ChapterFormViewModel viewModel,
-        CancellationToken cancellationToken)
-    {
-        if (!viewModel.ChapterId.HasValue)
-        {
-            return BadRequest();
-        }
-
-        if (!ModelState.IsValid)
-        {
-            await PopulateSubjectNameAsync(viewModel, cancellationToken);
-            return View(viewModel);
-        }
-
-        try
-        {
-            bool updated = await _subjectService.UpdateChapterAsync(
-                new ChapterUpsertDto(
-                    viewModel.ChapterId,
-                    viewModel.SubjectId,
-                    GetCurrentUserId(),
-                    viewModel.Title,
-                    viewModel.Description),
-                cancellationToken);
-
-            if (!updated)
-            {
-                return NotFound();
-            }
-
-            TempData["SuccessMessage"] = "Đã cập nhật chương.";
-
-            return RedirectToAction(nameof(Details), new { id = viewModel.SubjectId });
-        }
-        catch (BusinessValidationException ex)
-        {
-            AddValidationErrors(ex);
-            await PopulateSubjectNameAsync(viewModel, cancellationToken);
-
-            return View(viewModel);
-        }
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> DeleteChapter(int id, int subjectId, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteChapter(int subjectId, int chapterId, CancellationToken cancellationToken)
     {
         try
         {
             bool deleted = await _subjectService.DeleteChapterAsync(
-                id,
+                subjectId,
+                chapterId,
                 GetCurrentUserId(),
                 cancellationToken);
 
@@ -309,18 +182,6 @@ public sealed class SubjectController : Controller
         }
 
         return RedirectToAction(nameof(Details), new { id = subjectId });
-    }
-
-    private async Task PopulateSubjectNameAsync(
-        ChapterFormViewModel viewModel,
-        CancellationToken cancellationToken)
-    {
-        SubjectDetailsDto? subject = await _subjectService.GetSubjectDetailsAsync(
-            viewModel.SubjectId,
-            GetCurrentUserId(),
-            cancellationToken);
-
-        viewModel.SubjectName = subject?.Name;
     }
 
     private int GetCurrentUserId()

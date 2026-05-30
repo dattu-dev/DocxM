@@ -26,21 +26,3 @@ public sealed class SubjectFormViewModel
     [Display(Name = "Mô tả")]
     public string? Description { get; set; }
 }
-
-public sealed class ChapterFormViewModel
-{
-    public int? ChapterId { get; set; }
-
-    public int SubjectId { get; set; }
-
-    public string? SubjectName { get; set; }
-
-    [Required(ErrorMessage = "Vui lòng nhập tên chương.")]
-    [StringLength(250, MinimumLength = 2, ErrorMessage = "Tên chương phải từ 2 đến 250 ký tự.")]
-    [Display(Name = "Tên chương")]
-    public string Title { get; set; } = string.Empty;
-
-    [StringLength(1000, ErrorMessage = "Mô tả không được vượt quá 1000 ký tự.")]
-    [Display(Name = "Mô tả")]
-    public string? Description { get; set; }
-}

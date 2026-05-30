@@ -32,6 +32,7 @@ public sealed class SubjectRepository : ISubjectRepository
     {
         return _context.Subjects
             .Include(subject => subject.Chapters)
+                .ThenInclude(chapter => chapter.Documents)
             .Include(subject => subject.Documents)
             .FirstOrDefaultAsync(
                 subject => subject.SubjectId == subjectId && subject.CreatedByUserId == userId,

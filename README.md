@@ -1,6 +1,6 @@
 # DocXM
 
-DocXM là ứng dụng ASP.NET Core MVC dùng để quản lý tài liệu học tập theo môn học và chương. Phạm vi hiện tại là Workflow 1: người dùng đăng nhập, tạo môn học, tạo chương, tải tài liệu lên, hệ thống validate file, lưu file gốc, trích xuất nội dung, chia chunk, sinh embedding và lưu metadata.
+DocXM là ứng dụng ASP.NET Core MVC dùng để quản lý tài liệu học tập theo môn học và chương. Phạm vi hiện tại là Workflow 1: người dùng đăng nhập, tạo môn học, tải tài liệu lên, nhập tên chương cho tài liệu, hệ thống validate file, lưu file gốc, trích xuất nội dung, chia chunk, sinh embedding và lưu metadata.
 
 ## Công nghệ sử dụng
 
@@ -61,23 +61,22 @@ Người dùng có thể:
 - Tạo môn học.
 - Chỉnh sửa môn học.
 - Xóa môn học nếu môn học chưa có chương hoặc tài liệu.
-- Tạo chương thuộc môn học của mình.
-- Chỉnh sửa chương.
+- Nhập tên chương khi tải tài liệu lên; hệ thống tự tạo chương nếu chưa tồn tại trong môn học.
 - Xóa chương nếu chương chưa có tài liệu.
 - Tải lên tài liệu thuộc chương.
 - Xem danh sách tài liệu của mình.
 - Xem chi tiết tài liệu của mình.
 - Tải file gốc của mình.
 - Xóa tài liệu của mình.
-- Lập chỉ mục lại tài liệu của mình.
+- Xử lý lại tài liệu của mình.
 
 Quy tắc nghiệp vụ:
 
 - Một người dùng có thể có nhiều môn học.
-- Một môn học có thể có nhiều chương.
+- Một môn học có thể có nhiều chương, nhưng chương được tạo thông qua thao tác tải tài liệu.
 - Một chương có thể có nhiều tài liệu.
 - Một tài liệu chỉ thuộc về một chương.
-- Chỉ người tạo/upload mới được xem, tải, xóa hoặc lập chỉ mục lại tài liệu đó.
+- Chỉ người tạo/upload mới được xem, tải, xóa hoặc xử lý lại tài liệu đó.
 
 ## Workflow xử lý tài liệu
 
@@ -125,7 +124,7 @@ Trong phiên bản hiện tại:
 
 - Đăng ký, đăng nhập, đăng xuất.
 - Quản lý môn học theo từng người dùng.
-- Quản lý chương theo từng môn học.
+- Tạo chương tự động theo tên chương người dùng nhập khi tải tài liệu.
 - Upload tài liệu PDF, DOCX, PPTX.
 - Validate định dạng file, dung lượng, tên file, content type và chữ ký file thật.
 - Lưu file gốc theo cấu trúc:
@@ -143,7 +142,7 @@ Presentation/wwwroot/uploads/{userId}/{subjectId}/{chapterId}/{file}
 - Xem chi tiết tài liệu và nội dung đã chia chunk.
 - Tải file gốc.
 - Xóa tài liệu và dữ liệu liên quan.
-- Lập chỉ mục lại tài liệu.
+- Xử lý lại tài liệu.
 
 ## Thiết lập database
 
@@ -236,7 +235,7 @@ Tầng `Presentation`:
 
 - Bắt buộc đăng nhập.
 - Bắt buộc chọn môn học.
-- Bắt buộc chọn chương.
+- Bắt buộc nhập tên chương.
 - Bắt buộc nhập tiêu đề tài liệu.
 - Bắt buộc chọn file.
 - Kiểm tra extension, dung lượng, tên file và content type.
@@ -245,8 +244,9 @@ Tầng `BusinessLogic`:
 
 - Người dùng phải tồn tại và đang active.
 - Môn học phải thuộc người dùng hiện tại.
-- Chương phải thuộc môn học đã chọn.
-- Chương phải thuộc người dùng hiện tại.
+- Tên chương phải từ 2 đến 250 ký tự.
+- Nếu tên chương đã tồn tại trong môn học đã chọn, hệ thống dùng lại chương đó.
+- Nếu tên chương chưa tồn tại, hệ thống tự tạo chương mới trong môn học đã chọn.
 - Tiêu đề và mô tả không được vượt quá độ dài quy định.
 - File stream phải đọc được.
 - File không được rỗng.

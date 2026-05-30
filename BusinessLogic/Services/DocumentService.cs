@@ -123,24 +123,20 @@ public sealed class DocumentService : IDocumentService
         string originalFileName = Path.GetFileName(upload.OriginalFileName);
         string fileExtension = Path.GetExtension(originalFileName).ToLowerInvariant();
         string storedFileName = $"{Guid.NewGuid():N}{fileExtension}";
-        string relativePath = Path.Combine(
-            "uploads",
-            upload.UploadedByUserId.ToString(),
-            upload.SubjectId.ToString(),
-            upload.ChapterId.GetValueOrDefault().ToString(),
-            storedFileName).Replace('\\', '/');
-        string physicalPath = GetSafePhysicalPath(upload.WebRootPath, relativePath);
+        string tempRelativePath = Path.Combine("uploads", "_temp", storedFileName).Replace('\\', '/');
+        string tempPhysicalPath = GetSafePhysicalPath(upload.WebRootPath, tempRelativePath);
+        string? physicalPath = null;
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(physicalPath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(tempPhysicalPath)!);
 
-            await using (FileStream output = File.Create(physicalPath))
+            await using (FileStream output = File.Create(tempPhysicalPath))
             {
                 await upload.FileStream.CopyToAsync(output, cancellationToken);
             }
 
-            if (!_fileSignatureValidator.HasValidSignature(physicalPath, fileExtension))
+            if (!_fileSignatureValidator.HasValidSignature(tempPhysicalPath, fileExtension))
             {
                 throw new BusinessValidationException(
                 [
@@ -148,11 +144,28 @@ public sealed class DocumentService : IDocumentService
                 ]);
             }
 
+            Chapter chapter = await _documentRepository.GetOrCreateChapterAsync(
+                upload.SubjectId,
+                upload.UploadedByUserId,
+                upload.ChapterTitle,
+                cancellationToken);
+            await _documentRepository.SaveChangesAsync(cancellationToken);
+
+            string relativePath = Path.Combine(
+                "uploads",
+                upload.UploadedByUserId.ToString(),
+                upload.SubjectId.ToString(),
+                chapter.ChapterId.ToString(),
+                storedFileName).Replace('\\', '/');
+            physicalPath = GetSafePhysicalPath(upload.WebRootPath, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(physicalPath)!);
+            File.Move(tempPhysicalPath, physicalPath, overwrite: true);
+
             var document = new Document
             {
                 UploadedByUserId = upload.UploadedByUserId,
                 SubjectId = upload.SubjectId,
-                ChapterId = upload.ChapterId,
+                ChapterId = chapter.ChapterId,
                 Title = upload.Title.Trim(),
                 Description = string.IsNullOrWhiteSpace(upload.Description) ? null : upload.Description.Trim(),
                 OriginalFileName = originalFileName,
@@ -180,7 +193,13 @@ public sealed class DocumentService : IDocumentService
         }
         catch
         {
-            DeleteFileIfExists(physicalPath);
+            DeleteFileIfExists(tempPhysicalPath);
+
+            if (physicalPath is not null)
+            {
+                DeleteFileIfExists(physicalPath);
+            }
+
             throw;
         }
     }
@@ -237,7 +256,7 @@ public sealed class DocumentService : IDocumentService
         {
             throw new BusinessValidationException(
             [
-                new ValidationError("File", "Không tìm thấy file vật lý để lập chỉ mục lại.")
+                new ValidationError("File", "Không tìm thấy file vật lý để xử lý lại.")
             ]);
         }
 
@@ -290,35 +309,10 @@ public sealed class DocumentService : IDocumentService
             }
         }
 
-        if (!upload.ChapterId.HasValue)
-        {
-            errors.Add(new ValidationError(nameof(upload.ChapterId), "Vui lòng chọn chương."));
-        }
-        else
-        {
-            if (upload.ChapterId.Value <= 0)
-            {
-                errors.Add(new ValidationError(nameof(upload.ChapterId), "Chương không hợp lệ."));
-            }
-            else
-            {
-                Chapter? chapter = await _documentRepository.GetChapterByIdAsync(
-                    upload.ChapterId.Value,
-                    upload.UploadedByUserId,
-                    cancellationToken);
-
-                if (chapter is null)
-                {
-                    errors.Add(new ValidationError(nameof(upload.ChapterId), "Chương không tồn tại."));
-                }
-                else if (upload.SubjectId > 0 && chapter.SubjectId != upload.SubjectId)
-                {
-                    errors.Add(new ValidationError(nameof(upload.ChapterId), "Chương không thuộc môn học đã chọn."));
-                }
-            }
-        }
-
+        ValidateText(errors, nameof(upload.ChapterTitle), upload.ChapterTitle, 250, required: true);
+        ValidateMinimumLength(errors, nameof(upload.ChapterTitle), upload.ChapterTitle, "Tên chương", 2);
         ValidateText(errors, nameof(upload.Title), upload.Title, DocumentUploadRules.MaxTitleLength, required: true);
+        ValidateMinimumLength(errors, nameof(upload.Title), upload.Title, "Tiêu đề", 2);
         ValidateText(errors, nameof(upload.Description), upload.Description, DocumentUploadRules.MaxDescriptionLength, required: false);
         ValidateFileMetadata(errors, upload);
 
@@ -358,6 +352,19 @@ public sealed class DocumentService : IDocumentService
         if (hasInvalidControlCharacter)
         {
             errors.Add(new ValidationError(fieldName, "Không được chứa ký tự điều khiển không hợp lệ."));
+        }
+    }
+
+    private static void ValidateMinimumLength(
+        ICollection<ValidationError> errors,
+        string fieldName,
+        string? value,
+        string label,
+        int minLength)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && value.Trim().Length < minLength)
+        {
+            errors.Add(new ValidationError(fieldName, $"{label} phải có ít nhất {minLength} ký tự."));
         }
     }
 

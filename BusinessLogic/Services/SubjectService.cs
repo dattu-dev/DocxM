@@ -8,7 +8,6 @@ namespace BusinessLogic.Services;
 public sealed class SubjectService : ISubjectService
 {
     private const int MaxSubjectNameLength = 200;
-    private const int MaxChapterTitleLength = 250;
     private const int MaxDescriptionLength = 1000;
 
     private readonly ISubjectRepository _subjectRepository;
@@ -121,7 +120,7 @@ public sealed class SubjectService : ISubjectService
         {
             throw new BusinessValidationException(
             [
-                new ValidationError(string.Empty, "Không thể xóa môn học đang có chương hoặc tài liệu.")
+                new ValidationError(string.Empty, "Không thể xóa môn học đang có chương hoặc tài liệu. Hãy xóa tài liệu và chương trước.")
             ]);
         }
 
@@ -131,98 +130,15 @@ public sealed class SubjectService : ISubjectService
         return true;
     }
 
-    public async Task<IReadOnlyList<ChapterListItemDto>> GetChaptersAsync(
-        int subjectId,
-        int userId,
-        CancellationToken cancellationToken = default)
-    {
-        IReadOnlyList<Chapter> chapters = await _subjectRepository.GetChaptersAsync(
-            subjectId,
-            userId,
-            cancellationToken);
-
-        return chapters.Select(MapChapterListItem).ToList();
-    }
-
-    public async Task<ChapterListItemDto?> GetChapterAsync(
-        int chapterId,
-        int userId,
-        CancellationToken cancellationToken = default)
-    {
-        Chapter? chapter = await _subjectRepository.GetChapterByIdAsync(
-            chapterId,
-            userId,
-            cancellationToken);
-
-        return chapter is null ? null : MapChapterListItem(chapter);
-    }
-
-    public async Task<int> CreateChapterAsync(
-        ChapterUpsertDto dto,
-        CancellationToken cancellationToken = default)
-    {
-        await ValidateChapterAsync(dto, cancellationToken);
-
-        int chapterNumber = await _subjectRepository.GetNextChapterNumberAsync(
-            dto.SubjectId,
-            cancellationToken);
-
-        var chapter = new Chapter
-        {
-            SubjectId = dto.SubjectId,
-            Title = dto.Title.Trim(),
-            Description = NormalizeNullable(dto.Description),
-            ChapterNumber = chapterNumber,
-            SortOrder = chapterNumber,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        await _subjectRepository.AddChapterAsync(chapter, cancellationToken);
-        await _subjectRepository.SaveChangesAsync(cancellationToken);
-
-        return chapter.ChapterId;
-    }
-
-    public async Task<bool> UpdateChapterAsync(
-        ChapterUpsertDto dto,
-        CancellationToken cancellationToken = default)
-    {
-        if (!dto.ChapterId.HasValue)
-        {
-            throw new BusinessValidationException(
-            [
-                new ValidationError(nameof(dto.ChapterId), "Không xác định được chương cần cập nhật.")
-            ]);
-        }
-
-        Chapter? chapter = await _subjectRepository.GetChapterByIdAsync(
-            dto.ChapterId.Value,
-            dto.UserId,
-            cancellationToken);
-
-        if (chapter is null)
-        {
-            return false;
-        }
-
-        await ValidateChapterAsync(dto, cancellationToken);
-
-        chapter.Title = dto.Title.Trim();
-        chapter.Description = NormalizeNullable(dto.Description);
-
-        await _subjectRepository.SaveChangesAsync(cancellationToken);
-
-        return true;
-    }
-
     public async Task<bool> DeleteChapterAsync(
+        int subjectId,
         int chapterId,
         int userId,
         CancellationToken cancellationToken = default)
     {
         Chapter? chapter = await _subjectRepository.GetChapterByIdAsync(chapterId, userId, cancellationToken);
 
-        if (chapter is null)
+        if (chapter is null || chapter.SubjectId != subjectId)
         {
             return false;
         }
@@ -231,7 +147,7 @@ public sealed class SubjectService : ISubjectService
         {
             throw new BusinessValidationException(
             [
-                new ValidationError(string.Empty, "Không thể xóa chương đang có tài liệu.")
+                new ValidationError(string.Empty, "Không thể xóa chương đang có tài liệu. Hãy xóa tài liệu trong chương này trước.")
             ]);
         }
 
@@ -259,27 +175,6 @@ public sealed class SubjectService : ISubjectService
         {
             errors.Add(new ValidationError(nameof(dto.Name), "Tên môn học đã tồn tại."));
         }
-
-        ThrowIfAny(errors);
-    }
-
-    private async Task ValidateChapterAsync(
-        ChapterUpsertDto dto,
-        CancellationToken cancellationToken)
-    {
-        var errors = new List<ValidationError>();
-
-        if (dto.SubjectId <= 0)
-        {
-            errors.Add(new ValidationError(nameof(dto.SubjectId), "Vui lòng chọn môn học."));
-        }
-        else if (await _subjectRepository.GetSubjectByIdAsync(dto.SubjectId, dto.UserId, cancellationToken) is null)
-        {
-            errors.Add(new ValidationError(nameof(dto.SubjectId), "Môn học không tồn tại."));
-        }
-
-        ValidateText(errors, nameof(dto.Title), dto.Title, "Tên chương", 2, MaxChapterTitleLength, required: true);
-        ValidateText(errors, nameof(dto.Description), dto.Description, "Mô tả", 0, MaxDescriptionLength, required: false);
 
         ThrowIfAny(errors);
     }

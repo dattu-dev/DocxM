@@ -28,3 +28,60 @@ body {
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 0.9rem;
 }
+
+.documents-table {
+  table-layout: fixed;
+}
+
+.documents-col-title {
+  width: 34%;
+}
+
+.documents-col-subject {
+  width: 17%;
+}
+
+.documents-col-user {
+  width: 12%;
+}
+
+.documents-col-count {
+  width: 7%;
+}
+
+.documents-col-date {
+  width: 12%;
+}
+
+.documents-col-actions {
+  width: 18%;
+}
+
+.document-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.document-actions form {
+  margin: 0;
+}
+
+.document-actions .btn {
+  white-space: nowrap;
+}
+
+.document-actions .btn-reindex {
+  min-width: 92px;
+}
+
+@media (max-width: 992px) {
+  .documents-table {
+    table-layout: auto;
+  }
+
+  .document-actions {
+    flex-wrap: wrap;
+  }
+}

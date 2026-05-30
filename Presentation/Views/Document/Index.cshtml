@@ -1,4 +1,4 @@
-﻿@model DocumentIndexViewModel
+@model DocumentIndexViewModel
 
 @{
     ViewData["Title"] = "Quản lý tài liệu";
@@ -6,7 +6,6 @@
 
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
     <div>
-       
         <h1 class="display-6 mb-0">Quản lý tài liệu</h1>
     </div>
     <a class="btn btn-primary" asp-action="Create">Tải tài liệu lên</a>
@@ -26,13 +25,20 @@
     <div class="row g-3 align-items-end">
         <div class="col-md-4">
             <label asp-for="SubjectId" class="form-label">Môn học</label>
-            <select asp-for="SubjectId" asp-items="Model.Subjects" class="form-select"></select>
-        </div>
-        <div class="col-md-4">
-            <label asp-for="ChapterId" class="form-label">Chương</label>
-            <select asp-for="ChapterId" asp-items="Model.Chapters" class="form-select"></select>
+            <select asp-for="SubjectId"
+                    asp-items="Model.Subjects"
+                    class="form-select"
+                    onchange="document.getElementById('ChapterId').value = ''; this.form.submit();"></select>
         </div>
         <div class="col-md-3">
+            <label asp-for="ChapterId" class="form-label">Chương</label>
+            <select asp-for="ChapterId"
+                    asp-items="Model.Chapters"
+                    class="form-select"
+                    disabled="@(!Model.SubjectId.HasValue)"
+                    onchange="this.form.submit();"></select>
+        </div>
+        <div class="col-md-4">
             <label asp-for="SearchTerm" class="form-label">Tìm kiếm</label>
             <input asp-for="SearchTerm" class="form-control" placeholder="Tiêu đề, file, mô tả" />
         </div>
@@ -44,14 +50,21 @@
 
 <div class="card border-0 shadow-sm">
     <div class="table-responsive">
-        <table class="table align-middle mb-0">
+        <table class="table align-middle mb-0 documents-table">
+            <colgroup>
+                <col class="documents-col-title" />
+                <col class="documents-col-subject" />
+                <col class="documents-col-user" />
+                <col class="documents-col-count" />
+                <col class="documents-col-date" />
+                <col class="documents-col-actions" />
+            </colgroup>
             <thead class="table-light">
                 <tr>
                     <th>Tài liệu</th>
                     <th>Môn / chương</th>
                     <th>Người upload</th>
-                    <th>Trạng thái</th>
-                    <th>Số đoạn</th>
+                    <th class="text-center">Số đoạn</th>
                     <th>Ngày tải lên</th>
                     <th class="text-end">Thao tác</th>
                 </tr>
@@ -60,7 +73,7 @@
             @if (Model.Documents.Count == 0)
             {
                 <tr>
-                    <td colspan="7" class="text-center text-muted py-5">
+                    <td colspan="6" class="text-center text-muted py-5">
                         Chưa có tài liệu nào. Hãy tải PDF, DOCX hoặc PPTX đầu tiên.
                     </td>
                 </tr>
@@ -80,20 +93,15 @@
                             <div class="small text-muted">@(document.ChapterTitle ?? "Không gắn chương")</div>
                         </td>
                         <td>@(document.UploadedByFullName ?? "Không xác định")</td>
-                        <td>
-                            <span class="badge @GetStatusBadge(document.ProcessingStatus)">
-                                @GetStatusLabel(document.ProcessingStatus)
-                            </span>
-                        </td>
-                        <td>@document.ChunkCount</td>
-                        <td>@document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="text-center">@document.ChunkCount</td>
+                        <td>@document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy")</td>
                         <td class="text-end">
-                            <div class="d-inline-flex gap-2">
+                            <div class="document-actions">
                                 <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@document.DocumentId">Chi tiết</a>
                                 <a class="btn btn-sm btn-outline-secondary" asp-action="Download" asp-route-id="@document.DocumentId">Tải file</a>
                                 <form asp-action="ReIndex" asp-route-id="@document.DocumentId" method="post"
-                                      onsubmit="return confirm('Lập chỉ mục lại tài liệu này?');">
-                                    <button class="btn btn-sm btn-outline-warning" type="submit">Lập chỉ mục lại</button>
+                                      onsubmit="return confirm('Xử lý lại tài liệu này?');">
+                                    <button class="btn btn-sm btn-outline-warning btn-reindex" type="submit">Xử lý lại</button>
                                 </form>
                                 <form asp-action="Delete" asp-route-id="@document.DocumentId" method="post"
                                       onsubmit="return confirm('Xóa tài liệu này?');">
@@ -123,26 +131,5 @@
         }
 
         return $"{size:0.##} {units[unit]}";
-    }
-
-    private static string GetStatusBadge(string status)
-    {
-        return status switch
-        {
-            "Indexed" => "text-bg-success",
-            "Failed" => "text-bg-danger",
-            _ => "text-bg-secondary"
-        };
-    }
-
-    private static string GetStatusLabel(string status)
-    {
-        return status switch
-        {
-            "Indexed" => "Đã lập chỉ mục",
-            "Failed" => "Lỗi xử lý",
-            "Uploaded" => "Đã tải lên",
-            _ => status
-        };
     }
 }

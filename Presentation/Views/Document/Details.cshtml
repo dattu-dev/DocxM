@@ -12,8 +12,8 @@
     <div class="d-flex gap-2">
         <a class="btn btn-outline-secondary" asp-action="Download" asp-route-id="@Model.Document.DocumentId">Tải file gốc</a>
         <form asp-action="ReIndex" asp-route-id="@Model.Document.DocumentId" method="post"
-              onsubmit="return confirm('Lập chỉ mục lại tài liệu này?');">
-            <button class="btn btn-outline-warning" type="submit">Lập chỉ mục lại</button>
+              onsubmit="return confirm('Xử lý lại tài liệu này?');">
+            <button class="btn btn-outline-warning" type="submit">Xử lý lại</button>
         </form>
         <form asp-action="Delete" asp-route-id="@Model.Document.DocumentId" method="post"
               onsubmit="return confirm('Xóa tài liệu này?');">
@@ -59,7 +59,7 @@
                     <dd class="col-sm-7">@FormatBytes(Model.Document.FileSizeBytes)</dd>
 
                     <dt class="col-sm-5">Ngày tải lên</dt>
-                    <dd class="col-sm-7">@Model.Document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</dd>
+                    <dd class="col-sm-7">@Model.Document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy")</dd>
                 </dl>
             </div>
         </div>
@@ -82,7 +82,7 @@
                 @if (Model.Document.Chunks.Count == 0)
                 {
                     <div class="alert alert-warning mb-0">
-                        Chưa có đoạn nào. File có thể không có nội dung trích xuất được hoặc quá trình lập chỉ mục bị lỗi.
+                        Chưa có đoạn nào. File có thể không có nội dung trích xuất được hoặc quá trình xử lý bị lỗi.
                     </div>
                 }
                 else
@@ -148,7 +148,7 @@
     {
         return status switch
         {
-            "Indexed" => "Đã lập chỉ mục",
+            "Indexed" => "Đã xử lý",
             "Failed" => "Lỗi xử lý",
             "Uploaded" => "Đã tải lên",
             _ => status

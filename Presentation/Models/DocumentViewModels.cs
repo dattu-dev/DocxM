@@ -28,10 +28,10 @@ public sealed class DocumentUploadViewModel
     [Display(Name = "Môn học")]
     public int SubjectId { get; set; }
 
-    [Required(ErrorMessage = "Vui lòng chọn chương.")]
-    [Range(1, int.MaxValue, ErrorMessage = "Vui lòng chọn chương.")]
     [Display(Name = "Chương")]
-    public int? ChapterId { get; set; }
+    [Required(ErrorMessage = "Vui lòng nhập tên chương.")]
+    [StringLength(250, MinimumLength = 2, ErrorMessage = "Tên chương phải từ 2 đến 250 ký tự.")]
+    public string ChapterTitle { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Vui lòng nhập tiêu đề.")]
     [StringLength(DocumentUploadRules.MaxTitleLength, MinimumLength = 2, ErrorMessage = "Tiêu đề phải từ 2 đến 250 ký tự.")]
@@ -49,7 +49,6 @@ public sealed class DocumentUploadViewModel
 
     public List<SelectListItem> Subjects { get; set; } = new();
 
-    public List<SelectListItem> Chapters { get; set; } = new();
 }
 
 public sealed class DocumentDetailsViewModel

@@ -59,7 +59,7 @@
                                 <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@subject.SubjectId">Chi tiết</a>
                                 <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@subject.SubjectId">Sửa</a>
                                 <form asp-action="Delete" asp-route-id="@subject.SubjectId" method="post"
-                                      onsubmit="return confirm('Xóa môn học này? Chỉ xóa được khi môn học chưa có chương hoặc tài liệu.');">
+                                      onsubmit="return confirm('Xóa môn học này? Chỉ xóa được khi môn học không còn chương hoặc tài liệu.');">
                                     <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
                                 </form>
                             </div>

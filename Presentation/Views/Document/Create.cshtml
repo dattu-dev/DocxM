@@ -1,4 +1,4 @@
-﻿@model DocumentUploadViewModel
+@model DocumentUploadViewModel
 
 @{
     ViewData["Title"] = "Tải tài liệu lên";
@@ -26,9 +26,9 @@
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="ChapterId" class="form-label"></label>
-                        <select asp-for="ChapterId" asp-items="Model.Chapters" class="form-select"></select>
-                        <span asp-validation-for="ChapterId" class="text-danger"></span>
+                        <label asp-for="ChapterTitle" class="form-label"></label>
+                        <input asp-for="ChapterTitle" class="form-control" placeholder="VD: Chapter 1, Tổng quan, Bài 1" />
+                        <span asp-validation-for="ChapterTitle" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
@@ -52,7 +52,7 @@
 
                     <div class="d-flex justify-content-end gap-2">
                         <a asp-action="Index" class="btn btn-outline-secondary">Hủy</a>
-                        <button type="submit" class="btn btn-primary">Tải lên và lập chỉ mục</button>
+                        <button type="submit" class="btn btn-primary">Tải lên và xử lý</button>
                     </div>
                 </form>
             </div>

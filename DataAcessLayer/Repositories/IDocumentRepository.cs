@@ -27,6 +27,12 @@ public interface IDocumentRepository
 
     Task<Chapter?> GetChapterByIdAsync(int chapterId, int userId, CancellationToken cancellationToken = default);
 
+    Task<Chapter> GetOrCreateChapterAsync(
+        int subjectId,
+        int userId,
+        string title,
+        CancellationToken cancellationToken = default);
+
     Task AddDocumentAsync(Document document, CancellationToken cancellationToken = default);
 
     void DeleteDocument(Document document);

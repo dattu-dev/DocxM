@@ -74,7 +74,7 @@ public sealed class DocumentUploadDto
 
     public int SubjectId { get; init; }
 
-    public int? ChapterId { get; init; }
+    public string ChapterTitle { get; init; } = string.Empty;
 
     public string Title { get; init; } = string.Empty;
 

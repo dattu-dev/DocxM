@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BusinessLogic.DTOs;
 using BusinessLogic.Services;
 using BusinessLogic.Validation;
@@ -5,7 +6,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Presentation.Models;
-using System.Security.Claims;
 
 namespace Presentation.Controllers;
 
@@ -32,6 +32,7 @@ public sealed class DocumentController : Controller
         subjectId = subjectId is > 0 ? subjectId : null;
         chapterId = chapterId is > 0 ? chapterId : null;
         searchTerm = NormalizeSearchTerm(searchTerm);
+        int currentUserId = GetCurrentUserId();
 
         if (searchTerm?.Length > 100)
         {
@@ -39,7 +40,9 @@ public sealed class DocumentController : Controller
             searchTerm = searchTerm[..100];
         }
 
-        var filter = new DocumentFilterDto(subjectId, chapterId, searchTerm, GetCurrentUserId());
+        chapterId = await NormalizeChapterFilterAsync(subjectId, chapterId, currentUserId, cancellationToken);
+
+        var filter = new DocumentFilterDto(subjectId, chapterId, searchTerm, currentUserId);
 
         var viewModel = new DocumentIndexViewModel
         {
@@ -57,7 +60,7 @@ public sealed class DocumentController : Controller
     public async Task<IActionResult> Create(CancellationToken cancellationToken)
     {
         var viewModel = new DocumentUploadViewModel();
-        await PopulateSelectListsAsync(viewModel, null, null, cancellationToken);
+        await PopulateSelectListsAsync(viewModel, null, cancellationToken);
 
         return View(viewModel);
     }
@@ -76,7 +79,7 @@ public sealed class DocumentController : Controller
 
         if (!ModelState.IsValid || viewModel.File is null)
         {
-            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, viewModel.ChapterId, cancellationToken);
+            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, cancellationToken);
             return View(viewModel);
         }
 
@@ -89,7 +92,7 @@ public sealed class DocumentController : Controller
                 {
                     UploadedByUserId = GetCurrentUserId(),
                     SubjectId = viewModel.SubjectId,
-                    ChapterId = viewModel.ChapterId,
+                    ChapterTitle = viewModel.ChapterTitle,
                     Title = viewModel.Title,
                     Description = viewModel.Description,
                     OriginalFileName = viewModel.File.FileName,
@@ -112,14 +115,14 @@ public sealed class DocumentController : Controller
                 ModelState.AddModelError(error.FieldName, error.ErrorMessage);
             }
 
-            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, viewModel.ChapterId, cancellationToken);
+            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, cancellationToken);
 
             return View(viewModel);
         }
         catch (InvalidOperationException ex)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
-            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, viewModel.ChapterId, cancellationToken);
+            await PopulateSelectListsAsync(viewModel, viewModel.SubjectId, cancellationToken);
 
             return View(viewModel);
         }
@@ -192,13 +195,13 @@ public sealed class DocumentController : Controller
                 cancellationToken);
 
             TempData[result is null ? "ErrorMessage" : "SuccessMessage"] = result is null
-                ? "Không tìm thấy tài liệu cần lập chỉ mục lại."
-                : $"Đã lập chỉ mục lại tài liệu. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}, số đoạn: {result.ChunkCount}.";
+                ? "Không tìm thấy tài liệu cần xử lý lại."
+                : $"Đã xử lý lại tài liệu. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}, số đoạn: {result.ChunkCount}.";
         }
         catch (BusinessValidationException ex)
         {
             TempData["ErrorMessage"] = ex.Errors.FirstOrDefault()?.ErrorMessage
-                ?? "Không thể lập chỉ mục lại tài liệu.";
+                ?? "Không thể xử lý lại tài liệu.";
         }
 
         return RedirectToAction(nameof(Details), new { id });
@@ -217,11 +220,9 @@ public sealed class DocumentController : Controller
     private async Task PopulateSelectListsAsync(
         DocumentUploadViewModel viewModel,
         int? selectedSubjectId,
-        int? selectedChapterId,
         CancellationToken cancellationToken)
     {
         viewModel.Subjects = await BuildSubjectSelectListAsync(selectedSubjectId, cancellationToken);
-        viewModel.Chapters = await BuildChapterSelectListAsync(selectedSubjectId, selectedChapterId, cancellationToken);
     }
 
     private async Task<List<SelectListItem>> BuildSubjectSelectListAsync(
@@ -250,22 +251,48 @@ public sealed class DocumentController : Controller
         int? selectedChapterId,
         CancellationToken cancellationToken)
     {
+        var items = new List<SelectListItem>
+        {
+            new(selectedSubjectId.HasValue ? "-- Chọn chương --" : "-- Chọn môn học trước --", string.Empty)
+        };
+
+        if (!selectedSubjectId.HasValue)
+        {
+            return items;
+        }
+
         IReadOnlyList<ChapterOptionDto> chapters = await _documentService.GetChaptersAsync(
             selectedSubjectId,
             GetCurrentUserId(),
             cancellationToken);
 
-        var items = new List<SelectListItem>
-        {
-            new("-- Chọn chương --", string.Empty)
-        };
-
         items.AddRange(chapters.Select(chapter => new SelectListItem(
-            $"Chương {chapter.ChapterNumber}: {chapter.Title}",
+            chapter.Title,
             chapter.ChapterId.ToString(),
             chapter.ChapterId == selectedChapterId)));
 
         return items;
+    }
+
+    private async Task<int?> NormalizeChapterFilterAsync(
+        int? subjectId,
+        int? chapterId,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        if (!subjectId.HasValue || !chapterId.HasValue)
+        {
+            return null;
+        }
+
+        IReadOnlyList<ChapterOptionDto> subjectChapters = await _documentService.GetChaptersAsync(
+            subjectId,
+            userId,
+            cancellationToken);
+
+        return subjectChapters.Any(chapter => chapter.ChapterId == chapterId.Value)
+            ? chapterId
+            : null;
     }
 
     private string GetWebRootPath()
@@ -315,7 +342,7 @@ public sealed class DocumentController : Controller
     {
         return status switch
         {
-            "Indexed" => "Đã lập chỉ mục",
+            "Indexed" => "Đã xử lý",
             "Failed" => "Lỗi xử lý",
             "Uploaded" => "Đã tải lên",
             _ => status
