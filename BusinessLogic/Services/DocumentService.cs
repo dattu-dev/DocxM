@@ -1,4 +1,7 @@
-﻿using AIService.Models;
+﻿using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using AIService.Models;
 using AIService.Services;
 using BusinessLogic.DTOs;
 using BusinessLogic.Validation;
@@ -439,14 +442,17 @@ public sealed class DocumentService : IDocumentService
                     document.FileExtension,
                     cancellationToken);
 
+                document.Title = ResolveDocumentTitle(document.Title, document.OriginalFileName, text);
                 IReadOnlyList<TextChunk> chunks = _textChunkingService.Chunk(text);
                 AddChunks(document, chunks);
             }
 
             document.ProcessingStatus = DocumentProcessingStatus.Uploaded.ToString();
         }
-        catch when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            Console.WriteLine($"[Document Processing] Extract/chunk failed for '{document.OriginalFileName}'. {exception.Message}");
+            System.Diagnostics.Debug.WriteLine(exception.ToString());
             document.ProcessingStatus = DocumentProcessingStatus.Failed.ToString();
             document.ChunkCount = 0;
             document.DocumentChunks.Clear();
@@ -471,6 +477,7 @@ public sealed class DocumentService : IDocumentService
                 chunk.VectorId ??= $"vec_{Guid.NewGuid():N}";
                 float[] embedding = await _embeddingService.GenerateEmbeddingAsync(
                     chunk.Content,
+                    EmbeddingTaskType.RetrievalDocument,
                     cancellationToken);
 
                 await _vectorStore.UpsertAsync(
@@ -486,8 +493,10 @@ public sealed class DocumentService : IDocumentService
             document.ProcessingStatus = DocumentProcessingStatus.Indexed.ToString();
             document.UpdatedAt = DateTime.UtcNow;
         }
-        catch when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            Console.WriteLine($"[Document Processing] Vector indexing failed for DocumentId={document.DocumentId}, File='{document.OriginalFileName}'. {exception.Message}");
+            System.Diagnostics.Debug.WriteLine(exception.ToString());
             document.ProcessingStatus = DocumentProcessingStatus.Failed.ToString();
             document.UpdatedAt = DateTime.UtcNow;
         }
@@ -517,12 +526,218 @@ public sealed class DocumentService : IDocumentService
                 ChunkIndex = chunk.Index,
                 Content = chunk.Content,
                 TokenCount = chunk.EstimatedTokenCount,
+                SectionTitle = chunk.SectionTitle,
                 VectorId = $"vec_{Guid.NewGuid():N}",
                 CreatedAt = DateTime.UtcNow
             });
         }
 
         document.ChunkCount = chunks.Count;
+    }
+
+    private static string ResolveDocumentTitle(
+        string currentTitle,
+        string originalFileName,
+        string extractedText)
+    {
+        string? titleFromText = ExtractDocumentTitleFromText(extractedText);
+
+        if (!string.IsNullOrWhiteSpace(titleFromText))
+        {
+            return titleFromText;
+        }
+
+        string? titleFromFileName = CleanDocumentTitle(Path.GetFileNameWithoutExtension(originalFileName));
+
+        if (!string.IsNullOrWhiteSpace(titleFromFileName))
+        {
+            return titleFromFileName;
+        }
+
+        return string.IsNullOrWhiteSpace(currentTitle)
+            ? "Tài liệu"
+            : currentTitle.Trim();
+    }
+
+    private static string? ExtractDocumentTitleFromText(string extractedText)
+    {
+        string[] candidateLines = extractedText
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => Regex.Replace(line, @"\s+", " ").Trim())
+            .Where(line => line.Length > 0)
+            .Take(15)
+            .ToArray();
+
+        foreach (string line in candidateLines)
+        {
+            if (IsGenericDocumentTitle(line))
+            {
+                continue;
+            }
+
+            if (LooksLikeDocumentTitle(line))
+            {
+                return CleanDocumentTitle(line);
+            }
+        }
+
+        string? firstUsefulLine = candidateLines.FirstOrDefault(line => !IsGenericDocumentTitle(line));
+
+        return firstUsefulLine is null ? null : CleanDocumentTitle(firstUsefulLine);
+    }
+
+    private static bool LooksLikeDocumentTitle(string line)
+    {
+        if (line.Length is < 4 or > 180)
+        {
+            return false;
+        }
+
+        if (Regex.IsMatch(line, @"^(?:chapter|chương|chuong)\s+\d+\s*[-–:]", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        int wordCount = Regex.Split(line, @"\s+").Count(word => !string.IsNullOrWhiteSpace(word));
+
+        return wordCount is >= 2 and <= 24 &&
+               (!line.EndsWith('.') || UppercaseLetterRatio(line) >= 0.45);
+    }
+
+    private static string? CleanDocumentTitle(string value)
+    {
+        string title = Regex
+            .Replace(value.Replace('_', ' '), @"\s+", " ")
+            .Trim(' ', '-', '–', ':', ';', '.', ',');
+
+        if (title.Length == 0)
+        {
+            return null;
+        }
+
+        string[] dashParts = Regex
+            .Split(title, @"\s+[-–]\s+")
+            .Select(part => part.Trim())
+            .Where(part => part.Length > 0)
+            .ToArray();
+
+        if (dashParts.Length >= 2 && IsGenericTitlePrefix(dashParts[0]))
+        {
+            title = dashParts[^1];
+        }
+
+        title = Regex.Replace(
+            title,
+            @"^(?:tên\s+dự\s+án|ten\s+du\s+an|project|document|tài\s+liệu|tai\s+lieu)\s*[:\-–]\s*",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+        title = Regex.Replace(title, @"\s+", " ").Trim(' ', '-', '–', ':', ';', '.', ',');
+
+        if (title.Length == 0 || IsGenericDocumentTitle(title))
+        {
+            return null;
+        }
+
+        return ToVietnameseTitleCase(title);
+    }
+
+    private static bool IsGenericDocumentTitle(string value)
+    {
+        string normalized = NormalizeForTitleComparison(value);
+
+        string[] genericTitles =
+        [
+            "introduction",
+            "gioi thieu",
+            "muc luc",
+            "noi dung",
+            "table of contents",
+            "document",
+            "tai lieu"
+        ];
+
+        return genericTitles.Any(title => string.Equals(normalized, title, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsGenericTitlePrefix(string value)
+    {
+        string normalized = NormalizeForTitleComparison(value);
+
+        string[] genericPrefixes =
+        [
+            "cot truyen",
+            "noi dung",
+            "tai lieu",
+            "workflow",
+            "chapter",
+            "day du",
+            "full"
+        ];
+
+        return genericPrefixes.Any(prefix => normalized.Contains(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ToVietnameseTitleCase(string value)
+    {
+        CultureInfo culture = CultureInfo.GetCultureInfo("vi-VN");
+        string normalized = Regex.Replace(value, @"\s+", " ").Trim();
+        bool mostlyUppercase = UppercaseLetterRatio(normalized) >= 0.55;
+
+        if (!mostlyUppercase)
+        {
+            return normalized;
+        }
+
+        string lowered = culture.TextInfo.ToLower(normalized);
+
+        return culture.TextInfo.ToTitleCase(lowered);
+    }
+
+    private static double UppercaseLetterRatio(string value)
+    {
+        int letterCount = 0;
+        int uppercaseCount = 0;
+
+        foreach (char character in value)
+        {
+            if (!char.IsLetter(character))
+            {
+                continue;
+            }
+
+            letterCount++;
+
+            if (char.IsUpper(character))
+            {
+                uppercaseCount++;
+            }
+        }
+
+        return letterCount == 0 ? 0 : (double)uppercaseCount / letterCount;
+    }
+
+    private static string NormalizeForTitleComparison(string value)
+    {
+        string normalized = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (char character in normalized)
+        {
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(character);
+
+            if (category != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : ' ');
+            }
+        }
+
+        return Regex
+            .Replace(builder.ToString().Normalize(NormalizationForm.FormC), @"\s+", " ")
+            .Replace('đ', 'd')
+            .Replace('Đ', 'D')
+            .Trim();
     }
 
     private static string GetSafePhysicalPath(string webRootPath, string relativePath)
@@ -574,6 +789,7 @@ public sealed class DocumentService : IDocumentService
                 chunk.Content,
                 chunk.TokenCount,
                 chunk.PageNumber,
+                chunk.SectionTitle,
                 chunk.VectorId))
             .ToList();
 

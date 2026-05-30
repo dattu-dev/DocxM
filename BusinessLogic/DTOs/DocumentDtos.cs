@@ -26,6 +26,7 @@ public sealed record DocumentChunkDto(
     string Content,
     int? TokenCount,
     int? PageNumber,
+    string? SectionTitle,
     string? VectorId);
 
 public sealed record DocumentDetailsDto(

@@ -17,6 +17,8 @@ public partial class DocumentChunk
 
     public int? PageNumber { get; set; }
 
+    public string? SectionTitle { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public virtual Document Document { get; set; } = null!;

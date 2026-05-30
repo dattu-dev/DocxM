@@ -43,7 +43,7 @@ Trách nhiệm từng project:
 - `BusinessLogic`: chứa nghiệp vụ, validate và điều phối workflow.
 - `DataAcessLayer`: chứa `AppDbContext` và repository.
 - `BusinessObjects`: chứa entity database-first và enum.
-- `AIService`: xử lý validate chữ ký file, trích xuất text, chia chunk, sinh embedding và lưu vector demo.
+- `AIService`: xử lý validate chữ ký file, trích xuất text, chia chunk, sinh embedding và gọi AI tạo câu trả lời. Nếu có Gemini API key thì dùng Gemini thật; nếu chưa có key thì fallback về AI demo local.
 - `database`: chứa script tạo/cập nhật database SQL Server.
 
 `AIService` được tách riêng để sau này thay embedding model hoặc vector database thật mà không trộn logic AI vào MVC hoặc DAL.
@@ -117,8 +117,64 @@ Trong phiên bản hiện tại:
 
 - SQL Server lưu metadata tài liệu và chunk.
 - `DocumentChunks.VectorId` lưu mã vector tương ứng với mỗi chunk.
+- `DocumentChunks.SectionTitle` lưu heading/chapter gần nhất của chunk để chatbot tìm đúng ngữ cảnh hơn.
 - Vector database đang được mô phỏng bằng local JSON store tại `Presentation/App_Data/vector-store/vectors.json`.
 - Khi có vector database thật, chỉ cần thay implementation của `IVectorStore`.
+
+## Workflow chatbot hỏi đáp tài liệu
+
+Workflow diễn ra khi người dùng mở trang `Chatbot`:
+
+```text
+User nhập câu hỏi
+        |
+        v
+Chat Controller
+        |
+        v
+Chat Service
+        |
+        v
+Kiểm tra phạm vi môn học / chương / tài liệu
+        |
+        v
+Tạo embedding cho câu hỏi
+        |
+        v
+Search Vector Database
+        |
+        v
+Retrieve Relevant Chunks
+        |
+        v
+Tạo câu trả lời từ context
+        |
+        v
+Gắn nguồn trích dẫn
+        |
+        v
+Lưu lịch sử hội thoại vào SQL Server
+        |
+        v
+Hiển thị câu trả lời cho người dùng
+```
+
+Trong phiên bản hiện tại:
+
+- Người dùng chọn môn học, có thể chọn thêm chương hoặc tài liệu cụ thể.
+- Chatbot chỉ tìm trên tài liệu đã xử lý và thuộc tài khoản hiện tại.
+- Chatbot có intent detection: câu hỏi hỏi tên dự án/tên tài liệu/tên file/header sẽ trả lời từ metadata tài liệu; câu hỏi hỏi nội dung mới đi qua RAG vector/hybrid search.
+- Hệ thống chỉ lấy tối đa 5 chunk liên quan nhất, sau đó build prompt `QUESTION + CONTEXT` và gọi `AIService` để tạo câu trả lời.
+- Bước retrieve dùng hybrid search: vector search lấy ứng viên, keyword search ưu tiên từ khóa rõ ràng như `Chapter 2`, `Godot`, `Unity`, `GDScript`, `C#`, sau đó rerank để chọn top chunk tốt nhất.
+- Chatbot không trả nguyên chunk; câu trả lời được rút gọn theo trọng tâm câu hỏi và kèm nguồn.
+- Câu trả lời tối đa 2 câu; nguồn trích dẫn được hiển thị riêng để tránh lặp trong phần trả lời.
+- Trang Chatbot có nút `New chat` và sidebar lịch sử hội thoại.
+- Chat hiện tại được giữ bằng session; khi người dùng logout hoặc đóng browser, lần sau vào Chatbot sẽ bắt đầu chat mới.
+- Nguồn trích dẫn hiển thị theo tên file, trang nếu có và đoạn nội dung liên quan, tối đa 3 nguồn.
+- Lịch sử chat được lưu vào các bảng `ChatConversations`, `ChatMessages`, `ChatCitations`.
+- Nếu cấu hình `Gemini:Enabled=true` và có `Gemini:ApiKey`, hệ thống dùng Gemini API thật cho embedding và tạo câu trả lời.
+- Nếu chưa cấu hình Gemini API key, hệ thống dùng `PromptAnswerGenerationService` và `DeterministicEmbeddingService` để demo offline.
+- Console app có log `[RAG DEBUG]` hiển thị câu hỏi, chunk được retrieve, score từng chunk và prompt cuối cùng gửi vào AI.
 
 ## Chức năng hiện có
 
@@ -134,8 +190,8 @@ Presentation/wwwroot/uploads/{userId}/{subjectId}/{chapterId}/{file}
 ```
 
 - Trích xuất nội dung từ PDF/DOCX/PPTX.
-- Chia nội dung thành các chunk nhỏ.
-- Sinh embedding demo cho từng chunk.
+- Chia nội dung thành các chunk nhỏ khoảng 400 từ/chunk, overlap 70 từ để giữ ngữ cảnh giữa hai chunk.
+- Sinh embedding cho từng chunk. Khi có Gemini key sẽ dùng `gemini-embedding-001`; khi không có key sẽ dùng embedding demo local.
 - Lưu vector demo vào local vector store.
 - Lưu metadata tài liệu và chunk vào SQL Server.
 - Xem danh sách tài liệu theo môn học/chương.
@@ -143,6 +199,9 @@ Presentation/wwwroot/uploads/{userId}/{subjectId}/{chapterId}/{file}
 - Tải file gốc.
 - Xóa tài liệu và dữ liệu liên quan.
 - Xử lý lại tài liệu.
+- Chatbot hỏi đáp theo môn học/chương/tài liệu.
+- Hiển thị nguồn trích dẫn cho câu trả lời.
+- Lưu và xem lịch sử hội thoại.
 
 ## Thiết lập database
 
@@ -183,6 +242,12 @@ Tạo hoặc cập nhật database:
 sqlcmd -S "(localdb)\MSSQLLocalDB" -U sa -P 123456 -i database\DocXM.sql
 ```
 
+Nếu database đã có sẵn và chỉ cần thêm bảng cho Chatbot, chạy hoặc copy file:
+
+```powershell
+sqlcmd -S "(localdb)\MSSQLLocalDB" -U sa -P 123456 -i database\AddChatbotTables.sql
+```
+
 Nếu copy script vào SQL Server Management Studio, hãy copy từ file `database/DocXM.sql` hiện tại. File này đã được lưu dạng UTF-8 không BOM để tránh lỗi `Incorrect syntax near '﻿'`.
 
 Nếu database đang bị tạo dở hoặc chưa cần giữ dữ liệu cũ, chạy script reset sạch:
@@ -202,6 +267,9 @@ Các bảng chính:
 - `DocumentChunks`
 - `EmbeddingModels`
 - `DocumentEmbeddings`
+- `ChatConversations`
+- `ChatMessages`
+- `ChatCitations`
 
 ## Chạy ứng dụng
 
@@ -228,6 +296,34 @@ Route mặc định:
 ```text
 /Subject/Index
 ```
+
+## Cấu hình Gemini API
+
+Không commit API key vào source code. Nên cấu hình bằng biến môi trường hoặc user secrets.
+
+Trong `Presentation/appsettings.json` có sẵn cấu hình:
+
+```json
+"Gemini": {
+  "Enabled": false,
+  "ApiKey": "",
+  "BaseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "ChatModel": "gemini-2.5-flash",
+  "EmbeddingModel": "gemini-embedding-001",
+  "MaxOutputTokens": 512,
+  "Temperature": 0.1
+}
+```
+
+Bật Gemini bằng PowerShell:
+
+```powershell
+$env:Gemini__Enabled="true"
+$env:Gemini__ApiKey="YOUR_GEMINI_API_KEY"
+dotnet run --project Presentation\Presentation.csproj
+```
+
+Khi đổi từ embedding demo sang Gemini embedding, nên xử lý lại tài liệu hoặc upload lại tài liệu để vector cũ được tạo lại đúng model embedding.
 
 ## Quy tắc validate
 

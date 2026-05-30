@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AIService.Models;
 
 namespace AIService.Services;
 
@@ -9,6 +10,14 @@ public sealed class DeterministicEmbeddingService : IEmbeddingService
 
     public Task<float[]> GenerateEmbeddingAsync(
         string text,
+        CancellationToken cancellationToken = default)
+    {
+        return GenerateEmbeddingAsync(text, EmbeddingTaskType.RetrievalDocument, cancellationToken);
+    }
+
+    public Task<float[]> GenerateEmbeddingAsync(
+        string text,
+        EmbeddingTaskType taskType,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

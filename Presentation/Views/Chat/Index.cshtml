@@ -1,0 +1,218 @@
+@model ChatIndexViewModel
+
+@{
+    ViewData["Title"] = "Chatbot";
+}
+
+<div class="chat-page">
+    <aside class="chat-sidebar">
+        <a class="btn btn-light w-100 chat-new-btn" asp-action="New">+ New chat</a>
+
+        <div class="chat-sidebar-title">Lịch sử hội thoại</div>
+        <div class="chat-session-list">
+            @if (Model.Conversations.Count == 0)
+            {
+                <div class="chat-empty-history">Chưa có hội thoại.</div>
+            }
+            else
+            {
+                foreach (var conversation in Model.Conversations)
+                {
+                    string activeClass = conversation.ChatConversationId == Model.ConversationId ? "active" : string.Empty;
+
+                    <a class="chat-session-item @activeClass"
+                       asp-action="Index"
+                       asp-route-conversationId="@conversation.ChatConversationId"
+                       data-conversation-id="@conversation.ChatConversationId">
+                        <span>@conversation.Title</span>
+                        <small>@conversation.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                    </a>
+                }
+            }
+        </div>
+
+        <form id="deleteConversationForm" asp-action="DeleteConversation" method="post" class="d-none">
+            <input id="deleteConversationId" type="hidden" name="conversationId" />
+        </form>
+
+        <div id="chatContextMenu" class="chat-context-menu" hidden>
+            <button type="button" id="deleteConversationButton">Xóa hội thoại</button>
+        </div>
+    </aside>
+
+    <section class="chat-main">
+        <header class="chat-header">
+            <div>
+                <h1>Chatbot hỏi đáp tài liệu</h1>
+                <p>Trả lời theo tài liệu đã xử lý, có nguồn trích dẫn riêng.</p>
+            </div>
+        </header>
+
+        @if (!Model.HasIndexedDocuments)
+        {
+            <div class="alert alert-warning m-3">
+                Vui lòng tải lên và xử lý tài liệu trước khi sử dụng chatbot.
+            </div>
+        }
+        else if (Model.SubjectId.HasValue && !Model.HasChatReadyDocuments)
+        {
+            <div class="alert alert-warning m-3">
+                Tài liệu trong phạm vi đã chọn chưa được xử lý hoặc đang xử lý lỗi. Hãy vào Quản lý tài liệu và bấm "Xử lý lại" cho tài liệu đó.
+            </div>
+        }
+
+        <form method="get" asp-action="Index" class="chat-scope">
+            <div>
+                <label asp-for="SubjectId" class="form-label"></label>
+                <select asp-for="SubjectId"
+                        asp-items="Model.Subjects"
+                        class="form-select"
+                        onchange="document.getElementById('ChapterId').value = ''; document.getElementById('DocumentId').value = ''; this.form.submit();"></select>
+            </div>
+            <div>
+                <label asp-for="ChapterId" class="form-label"></label>
+                <select asp-for="ChapterId"
+                        asp-items="Model.Chapters"
+                        class="form-select"
+                        disabled="@(!Model.SubjectId.HasValue)"
+                        onchange="document.getElementById('DocumentId').value = ''; this.form.submit();"></select>
+            </div>
+            <div>
+                <label asp-for="DocumentId" class="form-label"></label>
+                <select asp-for="DocumentId"
+                        asp-items="Model.Documents"
+                        class="form-select"
+                        disabled="@(!Model.SubjectId.HasValue)"
+                        onchange="this.form.submit();"></select>
+            </div>
+        </form>
+
+        <div id="chatHistory" class="chat-history">
+            @if (Model.Messages.Count == 0)
+            {
+                <div class="chat-welcome">
+                    <div class="chat-welcome-icon">DocXM</div>
+                    <h2>Bắt đầu một cuộc trò chuyện mới</h2>
+                    <p>Chọn môn học rồi hỏi nội dung có trong tài liệu của bạn.</p>
+                </div>
+            }
+            else
+            {
+                foreach (var message in Model.Messages)
+                {
+                    <section class="chat-turn">
+                        <div class="chat-message chat-message-user">
+                            <div class="chat-message-content">
+                                <p>@message.UserQuestion</p>
+                            </div>
+                        </div>
+
+                        <div class="chat-message chat-message-ai">
+                            <div class="chat-avatar">AI</div>
+                            <div class="chat-message-content">
+                                <div class="chat-message-meta">
+                                    <span class="chat-role">AI</span>
+                                    <span>@message.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                                </div>
+                                <div class="chat-answer">@message.AiAnswer</div>
+
+                                @{
+                                    var sourceItems = message.Citations
+                                        .GroupBy(citation => new { citation.DocumentId, citation.PageNumber })
+                                        .Select(group => group.OrderByDescending(citation => citation.SimilarityScore).First())
+                                        .Take(3)
+                                        .ToList();
+                                }
+
+                                @if (sourceItems.Count > 0)
+                                {
+                                    <details class="chat-citations">
+                                        <summary>Nguồn trích dẫn (@sourceItems.Count)</summary>
+                                        @foreach (var citation in sourceItems)
+                                        {
+                                            <div class="chat-citation">
+                                                <div class="chat-citation-title">
+                                                    @citation.DocumentName
+                                                    @if (citation.PageNumber.HasValue)
+                                                    {
+                                                        <span>- Trang @citation.PageNumber.Value</span>
+                                                    }
+                                                </div>
+                                                <div class="chat-citation-snippet">@citation.Snippet</div>
+                                            </div>
+                                        }
+                                    </details>
+                                }
+                            </div>
+                        </div>
+                    </section>
+                }
+            }
+        </div>
+
+        <footer class="chat-composer">
+            <form asp-action="Ask" method="post">
+                <input asp-for="ConversationId" type="hidden" />
+                <input asp-for="SubjectId" type="hidden" />
+                <input asp-for="ChapterId" type="hidden" />
+                <input asp-for="DocumentId" type="hidden" />
+
+                <div asp-validation-summary="ModelOnly" class="text-danger mb-2"></div>
+                <div class="chat-input-shell">
+                    <textarea asp-for="Question"
+                              class="form-control"
+                              rows="2"
+                              placeholder="Nhập câu hỏi về tài liệu..."
+                              disabled="@(!Model.SubjectId.HasValue || !Model.HasChatReadyDocuments)"></textarea>
+                    <button class="btn btn-primary"
+                            type="submit"
+                            disabled="@(!Model.SubjectId.HasValue || !Model.HasChatReadyDocuments)">
+                        Gửi
+                    </button>
+                </div>
+                <span asp-validation-for="Question" class="text-danger"></span>
+            </form>
+        </footer>
+    </section>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        const chatHistory = document.getElementById('chatHistory');
+        if (chatHistory) {
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        const contextMenu = document.getElementById('chatContextMenu');
+        const deleteForm = document.getElementById('deleteConversationForm');
+        const deleteConversationId = document.getElementById('deleteConversationId');
+        const deleteButton = document.getElementById('deleteConversationButton');
+        let selectedConversationId = null;
+
+        document.querySelectorAll('.chat-session-item').forEach(item => {
+            item.addEventListener('contextmenu', event => {
+                event.preventDefault();
+                selectedConversationId = item.dataset.conversationId;
+                contextMenu.hidden = false;
+                contextMenu.style.left = `${event.clientX}px`;
+                contextMenu.style.top = `${event.clientY}px`;
+            });
+        });
+
+        document.addEventListener('click', event => {
+            if (!contextMenu.contains(event.target)) {
+                contextMenu.hidden = true;
+            }
+        });
+
+        deleteButton?.addEventListener('click', () => {
+            if (!selectedConversationId) {
+                return;
+            }
+
+            deleteConversationId.value = selectedConversationId;
+            deleteForm.submit();
+        });
+    </script>
+}

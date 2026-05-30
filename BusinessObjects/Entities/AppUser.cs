@@ -23,4 +23,6 @@ public sealed class AppUser
     public ICollection<Subject> Subjects { get; set; } = new List<Subject>();
 
     public ICollection<Document> Documents { get; set; } = new List<Document>();
+
+    public ICollection<ChatConversation> ChatConversations { get; set; } = new List<ChatConversation>();
 }

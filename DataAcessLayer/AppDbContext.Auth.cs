@@ -49,7 +49,68 @@ public partial class AppDbContext
 
         modelBuilder.Entity<DocumentChunk>(entity =>
         {
+            entity.Property(chunk => chunk.SectionTitle).HasMaxLength(250);
             entity.Property(chunk => chunk.VectorId).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<ChatConversation>(entity =>
+        {
+            entity.HasKey(conversation => conversation.ChatConversationId);
+            entity.HasIndex(conversation => conversation.UserId, "IX_ChatConversations_UserId");
+            entity.HasIndex(
+                conversation => new
+                {
+                    conversation.UserId,
+                    conversation.SubjectId,
+                    conversation.ChapterId,
+                    conversation.DocumentId
+                },
+                "IX_ChatConversations_Scope");
+
+            entity.Property(conversation => conversation.Title).HasMaxLength(250);
+            entity.Property(conversation => conversation.CreatedAt)
+                .HasPrecision(0)
+                .HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(conversation => conversation.UpdatedAt)
+                .HasPrecision(0)
+                .HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(conversation => conversation.User)
+                .WithMany(user => user.ChatConversations)
+                .HasForeignKey(conversation => conversation.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ChatConversations_AppUsers");
+        });
+
+        modelBuilder.Entity<ChatMessage>(entity =>
+        {
+            entity.HasKey(message => message.ChatMessageId);
+            entity.HasIndex(message => message.ChatConversationId, "IX_ChatMessages_ConversationId");
+            entity.Property(message => message.UserQuestion).HasMaxLength(1000);
+            entity.Property(message => message.CreatedAt)
+                .HasPrecision(0)
+                .HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(message => message.ChatConversation)
+                .WithMany(conversation => conversation.ChatMessages)
+                .HasForeignKey(message => message.ChatConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ChatMessages_ChatConversations");
+        });
+
+        modelBuilder.Entity<ChatCitation>(entity =>
+        {
+            entity.HasKey(citation => citation.ChatCitationId);
+            entity.HasIndex(citation => citation.ChatMessageId, "IX_ChatCitations_MessageId");
+            entity.HasIndex(citation => citation.DocumentId, "IX_ChatCitations_DocumentId");
+            entity.Property(citation => citation.DocumentName).HasMaxLength(260);
+            entity.Property(citation => citation.Snippet).HasMaxLength(1000);
+
+            entity.HasOne(citation => citation.ChatMessage)
+                .WithMany(message => message.ChatCitations)
+                .HasForeignKey(citation => citation.ChatMessageId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ChatCitations_ChatMessages");
         });
     }
 }

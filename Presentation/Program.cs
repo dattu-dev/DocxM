@@ -1,4 +1,5 @@
 using AIService;
+using AIService.Options;
 using BusinessLogic;
 using DataAcessLayer;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -10,8 +11,18 @@ string connectionString = builder.Configuration.GetConnectionString("DefaultConn
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is missing.");
 
 builder.Services.AddDataAccess(connectionString);
-builder.Services.AddAiService();
+GeminiOptions geminiOptions = builder.Configuration
+    .GetSection("Gemini")
+    .Get<GeminiOptions>() ?? new GeminiOptions();
+builder.Services.AddAiService(geminiOptions);
 builder.Services.AddBusinessLogic();
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.Cookie.Name = "DocXM.Session";
+    options.Cookie.IsEssential = true;
+    options.IdleTimeout = TimeSpan.FromHours(8);
+});
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -39,6 +50,7 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
+app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 
