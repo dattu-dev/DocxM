@@ -9,6 +9,7 @@ public interface IDocumentRepository
         int? chapterId,
         string? searchTerm,
         int? uploadedByUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<Document?> GetDocumentByIdAsync(
@@ -16,11 +17,15 @@ public interface IDocumentRepository
         bool includeChunks,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Subject>> GetSubjectsAsync(int userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Subject>> GetSubjectsAsync(
+        int? ownerUserId,
+        int? viewerUserId,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Chapter>> GetChaptersAsync(
         int? subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<bool> SubjectExistsAsync(int subjectId, int userId, CancellationToken cancellationToken = default);

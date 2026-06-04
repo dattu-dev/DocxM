@@ -14,6 +14,9 @@ public sealed class AppUser
 
     public string FullName { get; set; } = null!;
 
+    // Role quyết định nhánh phân quyền Instructor/Student trong controller và repository.
+    public string Role { get; set; } = null!;
+
     public string PasswordHash { get; set; } = null!;
 
     public bool IsActive { get; set; }
@@ -25,4 +28,8 @@ public sealed class AppUser
     public ICollection<Document> Documents { get; set; } = new List<Document>();
 
     public ICollection<ChatConversation> ChatConversations { get; set; } = new List<ChatConversation>();
+
+    public ICollection<SubjectPermission> SubjectPermissions { get; set; } = new List<SubjectPermission>();
+
+    public ICollection<SubjectPermission> GrantedSubjectPermissions { get; set; } = new List<SubjectPermission>();
 }

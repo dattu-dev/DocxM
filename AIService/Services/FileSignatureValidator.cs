@@ -15,6 +15,7 @@ public sealed class FileSignatureValidator : IFileSignatureValidator
             return false;
         }
 
+        // Kiểm tra cả magic bytes và khả năng mở file để tránh giả mạo extension.
         return extension switch
         {
             ".pdf" => HasPdfSignature(filePath) && CanOpenPdf(filePath),

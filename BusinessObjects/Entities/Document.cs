@@ -19,6 +19,7 @@ public partial class Document
 
     public string StoredFileName { get; set; } = null!;
 
+    // StoragePath là path tương đối; controller/service resolve sang physical path an toàn.
     public string StoragePath { get; set; } = null!;
 
     public string ContentType { get; set; } = null!;
@@ -29,6 +30,7 @@ public partial class Document
 
     public string ProcessingStatus { get; set; } = null!;
 
+    // ChunkCount giúp biết document đã đủ dữ liệu để chatbot sử dụng hay chưa.
     public int ChunkCount { get; set; }
 
     public DateTime UploadedAt { get; set; }

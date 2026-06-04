@@ -9,6 +9,7 @@ public sealed class PromptAnswerGenerationService : IAnswerGenerationService
     private const int MaxAnswerSentences = 2;
     private const int MaxSentenceCharacters = 260;
 
+    // Fallback này không gọi AI thật; nó chọn câu liên quan từ context trong prompt.
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "la", "gi", "cua", "va", "hoac", "the", "nao", "trong", "cho", "toi", "hay", "neu", "mot", "cac", "nhung",
@@ -25,6 +26,7 @@ public sealed class PromptAnswerGenerationService : IAnswerGenerationService
 
         if (parsedPrompt.Contexts.Count == 0)
         {
+            // Không có context thì trả lời an toàn thay vì suy đoán ngoài tài liệu.
             return Task.FromResult("Tài liệu chưa có thông tin phù hợp.");
         }
 

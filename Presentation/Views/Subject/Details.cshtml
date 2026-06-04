@@ -10,9 +10,13 @@
         <h1 class="display-6 mt-2 mb-0">@Model.Subject.Name</h1>
         <p class="text-muted mb-0">@(Model.Subject.Description ?? "Chưa có mô tả")</p>
     </div>
-    <div class="d-flex gap-2">
-        <a class="btn btn-outline-secondary" asp-action="Edit" asp-route-id="@Model.Subject.SubjectId">Sửa môn học</a>
-    </div>
+    @if (User.IsInRole(UserRoles.Instructor))
+    {
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary" asp-action="Permissions" asp-route-id="@Model.Subject.SubjectId">Quản lý sinh viên</a>
+            <a class="btn btn-outline-secondary" asp-action="Edit" asp-route-id="@Model.Subject.SubjectId">Sửa môn học</a>
+        </div>
+    }
 </div>
 
 @if (TempData["SuccessMessage"] is string successMessage)
@@ -35,15 +39,18 @@
                     <th>Mô tả</th>
                     <th>Số tài liệu</th>
                     <th>Ngày tạo</th>
-                    <th class="text-end">Thao tác</th>
+                    @if (User.IsInRole(UserRoles.Instructor))
+                    {
+                        <th class="text-end">Thao tác</th>
+                    }
                 </tr>
             </thead>
             <tbody>
             @if (Model.Subject.Chapters.Count == 0)
             {
                 <tr>
-                    <td colspan="5" class="text-center text-muted py-5">
-                        Môn học này chưa có chương. Chương sẽ được tạo khi bạn tải tài liệu lên.
+                    <td colspan="@(User.IsInRole(UserRoles.Instructor) ? 5 : 4)" class="text-center text-muted py-5">
+                        Môn học này chưa có chương.
                     </td>
                 </tr>
             }
@@ -56,7 +63,9 @@
                         <td>@(chapter.Description ?? "Chưa có mô tả")</td>
                         <td>@chapter.DocumentCount</td>
                         <td>@chapter.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
-                        <td class="text-end">
+                        @if (User.IsInRole(UserRoles.Instructor))
+                        {
+                            <td class="text-end">
                             @if (chapter.DocumentCount == 0)
                             {
                                 <form asp-action="DeleteChapter"
@@ -75,7 +84,8 @@
                                     Xóa
                                 </button>
                             }
-                        </td>
+                            </td>
+                        }
                     </tr>
                 }
             }

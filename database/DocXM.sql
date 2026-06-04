@@ -17,6 +17,7 @@ BEGIN
         Email NVARCHAR(256) NOT NULL,
         NormalizedEmail NVARCHAR(256) NOT NULL,
         FullName NVARCHAR(150) NOT NULL,
+        Role NVARCHAR(30) NOT NULL CONSTRAINT DF_AppUsers_Role DEFAULT (N'Student'),
         PasswordHash NVARCHAR(500) NOT NULL,
         IsActive BIT NOT NULL CONSTRAINT DF_AppUsers_IsActive DEFAULT (1),
         CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_AppUsers_CreatedAt DEFAULT (SYSUTCDATETIME())
@@ -24,6 +25,12 @@ BEGIN
 
     CREATE UNIQUE INDEX UX_AppUsers_NormalizedUserName ON dbo.AppUsers(NormalizedUserName);
     CREATE UNIQUE INDEX UX_AppUsers_NormalizedEmail ON dbo.AppUsers(NormalizedEmail);
+END
+GO
+
+IF COL_LENGTH(N'dbo.AppUsers', N'Role') IS NULL
+BEGIN
+    ALTER TABLE dbo.AppUsers ADD Role NVARCHAR(30) NOT NULL CONSTRAINT DF_AppUsers_Role DEFAULT (N'Instructor');
 END
 GO
 
@@ -61,6 +68,30 @@ IF OBJECT_ID(N'dbo.Subjects', N'U') IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_Subjects_CreatedByUserId' AND object_id = OBJECT_ID(N'dbo.Subjects'))
 BEGIN
     CREATE INDEX IX_Subjects_CreatedByUserId ON dbo.Subjects(CreatedByUserId);
+END
+GO
+
+IF OBJECT_ID(N'dbo.SubjectPermissions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SubjectPermissions
+    (
+        SubjectPermissionId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_SubjectPermissions PRIMARY KEY,
+        SubjectId INT NOT NULL,
+        StudentUserId INT NOT NULL,
+        GrantedByUserId INT NOT NULL,
+        GrantedAt DATETIME2(0) NOT NULL CONSTRAINT DF_SubjectPermissions_GrantedAt DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT FK_SubjectPermissions_Subjects FOREIGN KEY (SubjectId)
+            REFERENCES dbo.Subjects(SubjectId)
+            ON DELETE CASCADE,
+        CONSTRAINT FK_SubjectPermissions_StudentUsers FOREIGN KEY (StudentUserId)
+            REFERENCES dbo.AppUsers(UserId),
+        CONSTRAINT FK_SubjectPermissions_GrantedByUsers FOREIGN KEY (GrantedByUserId)
+            REFERENCES dbo.AppUsers(UserId)
+    );
+
+    CREATE UNIQUE INDEX UX_SubjectPermissions_Subject_Student ON dbo.SubjectPermissions(SubjectId, StudentUserId);
+    CREATE INDEX IX_SubjectPermissions_StudentUserId ON dbo.SubjectPermissions(StudentUserId);
+    CREATE INDEX IX_SubjectPermissions_GrantedByUserId ON dbo.SubjectPermissions(GrantedByUserId);
 END
 GO
 

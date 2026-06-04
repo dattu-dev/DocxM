@@ -22,6 +22,7 @@ public sealed class DeterministicEmbeddingService : IEmbeddingService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Vector deterministic giúp fallback local ổn định giữa các lần chạy demo.
         byte[] input = Encoding.UTF8.GetBytes(text ?? string.Empty);
         byte[] hash = SHA256.HashData(input);
         var vector = new float[Dimension];

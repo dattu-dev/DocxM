@@ -1,5 +1,6 @@
 using BusinessLogic.DTOs;
 using BusinessLogic.Validation;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAcessLayer.Repositories;
 
@@ -11,27 +12,34 @@ public sealed class SubjectService : ISubjectService
     private const int MaxDescriptionLength = 1000;
 
     private readonly ISubjectRepository _subjectRepository;
+    private readonly IUserRepository _userRepository;
 
-    public SubjectService(ISubjectRepository subjectRepository)
+    public SubjectService(
+        ISubjectRepository subjectRepository,
+        IUserRepository userRepository)
     {
         _subjectRepository = subjectRepository;
+        _userRepository = userRepository;
     }
 
     public async Task<IReadOnlyList<SubjectListItemDto>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<Subject> subjects = await _subjectRepository.GetSubjectsAsync(userId, cancellationToken);
+        // Repository áp dụng cùng một cặp filter cho Instructor và Student.
+        IReadOnlyList<Subject> subjects = await _subjectRepository.GetSubjectsAsync(ownerUserId, viewerUserId, cancellationToken);
 
         return subjects.Select(MapSubjectListItem).ToList();
     }
 
     public async Task<SubjectDetailsDto?> GetSubjectDetailsAsync(
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(subjectId, userId, cancellationToken);
+        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(subjectId, ownerUserId, viewerUserId, cancellationToken);
 
         if (subject is null)
         {
@@ -87,6 +95,7 @@ public sealed class SubjectService : ISubjectService
         Subject? subject = await _subjectRepository.GetSubjectByIdAsync(
             dto.SubjectId.Value,
             dto.UserId,
+            null,
             cancellationToken);
 
         if (subject is null)
@@ -109,7 +118,7 @@ public sealed class SubjectService : ISubjectService
         int userId,
         CancellationToken cancellationToken = default)
     {
-        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(subjectId, userId, cancellationToken);
+        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(subjectId, userId, null, cancellationToken);
 
         if (subject is null)
         {
@@ -125,6 +134,133 @@ public sealed class SubjectService : ISubjectService
         }
 
         _subjectRepository.DeleteSubject(subject);
+        await _subjectRepository.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<SubjectPermissionsDto?> GetSubjectPermissionsAsync(
+        int subjectId,
+        int instructorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(
+            subjectId,
+            instructorUserId,
+            null,
+            cancellationToken);
+
+        if (subject is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<SubjectPermission> permissions = await _subjectRepository.GetSubjectPermissionsAsync(
+            subjectId,
+            instructorUserId,
+            cancellationToken);
+
+        return new SubjectPermissionsDto(
+            subject.SubjectId,
+            subject.Name,
+            permissions.Select(MapPermissionListItem).ToList());
+    }
+
+    public async Task<bool> GrantSubjectPermissionAsync(
+        SubjectPermissionGrantDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        // Chỉ Instructor tạo Subject mới được cấp quyền cho Subject đó.
+        Subject? subject = await _subjectRepository.GetSubjectByIdAsync(
+            dto.SubjectId,
+            dto.InstructorUserId,
+            null,
+            cancellationToken);
+
+        if (subject is null)
+        {
+            return false;
+        }
+
+        string normalizedEmail = NormalizeEmail(dto.StudentEmail);
+        var errors = new List<ValidationError>();
+
+        if (string.IsNullOrWhiteSpace(normalizedEmail))
+        {
+            errors.Add(new ValidationError(nameof(dto.StudentEmail), "Vui lòng nhập email sinh viên."));
+            ThrowIfAny(errors);
+        }
+
+        AppUser? student = await _userRepository.GetByNormalizedEmailAsync(
+            normalizedEmail,
+            cancellationToken);
+
+        if (student is null)
+        {
+            errors.Add(new ValidationError(nameof(dto.StudentEmail), "Không tìm thấy tài khoản với email này."));
+            ThrowIfAny(errors);
+            return false;
+        }
+
+        if (!student.IsActive)
+        {
+            errors.Add(new ValidationError(nameof(dto.StudentEmail), "Tài khoản sinh viên này đang bị vô hiệu hóa."));
+            ThrowIfAny(errors);
+        }
+
+        if (!string.Equals(student.Role, UserRoles.Student, StringComparison.OrdinalIgnoreCase))
+        {
+            // Permission chỉ dành cho Student, không dùng để cấp quyền ngang hàng cho Instructor.
+            errors.Add(new ValidationError(nameof(dto.StudentEmail), "Chỉ có thể cấp quyền cho tài khoản sinh viên."));
+            ThrowIfAny(errors);
+        }
+
+        SubjectPermission? existingPermission = await _subjectRepository.GetSubjectPermissionAsync(
+            dto.SubjectId,
+            dto.InstructorUserId,
+            student.UserId,
+            cancellationToken);
+
+        if (existingPermission is not null)
+        {
+            // Chặn cấp trùng trước khi chạm unique constraint trong database.
+            errors.Add(new ValidationError(nameof(dto.StudentEmail), "Sinh viên này đã có quyền xem môn học."));
+            ThrowIfAny(errors);
+        }
+
+        await _subjectRepository.AddSubjectPermissionAsync(
+            new SubjectPermission
+            {
+                SubjectId = dto.SubjectId,
+                StudentUserId = student.UserId,
+                GrantedByUserId = dto.InstructorUserId,
+                GrantedAt = DateTime.UtcNow
+            },
+            cancellationToken);
+        await _subjectRepository.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<bool> RevokeSubjectPermissionAsync(
+        int subjectId,
+        int instructorUserId,
+        int studentUserId,
+        CancellationToken cancellationToken = default)
+    {
+        // Thu hồi quyền cũng kiểm tra Instructor sở hữu Subject.
+        SubjectPermission? permission = await _subjectRepository.GetSubjectPermissionAsync(
+            subjectId,
+            instructorUserId,
+            studentUserId,
+            cancellationToken);
+
+        if (permission is null)
+        {
+            return false;
+        }
+
+        _subjectRepository.DeleteSubjectPermission(permission);
         await _subjectRepository.SaveChangesAsync(cancellationToken);
 
         return true;
@@ -253,5 +389,21 @@ public sealed class SubjectService : ISubjectService
             chapter.Description,
             chapter.Documents.Count,
             chapter.CreatedAt);
+    }
+
+    private static SubjectPermissionListItemDto MapPermissionListItem(SubjectPermission permission)
+    {
+        return new SubjectPermissionListItemDto(
+            permission.StudentUserId,
+            permission.StudentUser.FullName,
+            permission.StudentUser.Email,
+            permission.GrantedAt);
+    }
+
+    private static string NormalizeEmail(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().ToUpperInvariant();
     }
 }

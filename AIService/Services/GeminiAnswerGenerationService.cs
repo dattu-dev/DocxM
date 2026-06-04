@@ -45,6 +45,7 @@ public sealed class GeminiAnswerGenerationService : IAnswerGenerationService
 
         try
         {
+            // Gọi Gemini API thật để sinh câu trả lời từ prompt RAG.
             using var response = await _client.PostAsync(endpoint, request, cancellationToken);
             string answer = ExtractAnswer(response.RootElement);
 
@@ -54,6 +55,7 @@ public sealed class GeminiAnswerGenerationService : IAnswerGenerationService
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            // Fallback local giúp hệ thống vẫn trả lời được khi Gemini không khả dụng.
             Console.WriteLine($"[Gemini] Answer generation failed, falling back to local answer generator. {exception.Message}");
             System.Diagnostics.Debug.WriteLine(exception.ToString());
 

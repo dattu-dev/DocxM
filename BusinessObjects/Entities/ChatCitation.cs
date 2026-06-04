@@ -8,6 +8,7 @@ public sealed class ChatCitation
 
     public int DocumentId { get; set; }
 
+    // DocumentChunkId trỏ về chunk đã được chọn làm nguồn RAG.
     public long DocumentChunkId { get; set; }
 
     public string DocumentName { get; set; } = null!;

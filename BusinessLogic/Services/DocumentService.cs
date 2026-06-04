@@ -16,27 +16,21 @@ public sealed class DocumentService : IDocumentService
     private readonly IDocumentRepository _documentRepository;
     private readonly IUserRepository _userRepository;
     private readonly IFileSignatureValidator _fileSignatureValidator;
-    private readonly IDocumentTextExtractor _textExtractor;
-    private readonly ITextChunkingService _textChunkingService;
-    private readonly IEmbeddingService _embeddingService;
-    private readonly IVectorStore _vectorStore;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly IDocumentProcessingService _documentProcessingService;
 
     public DocumentService(
         IDocumentRepository documentRepository,
         IUserRepository userRepository,
         IFileSignatureValidator fileSignatureValidator,
-        IDocumentTextExtractor textExtractor,
-        ITextChunkingService textChunkingService,
-        IEmbeddingService embeddingService,
-        IVectorStore vectorStore)
+        IFileStorageService fileStorageService,
+        IDocumentProcessingService documentProcessingService)
     {
         _documentRepository = documentRepository;
         _userRepository = userRepository;
         _fileSignatureValidator = fileSignatureValidator;
-        _textExtractor = textExtractor;
-        _textChunkingService = textChunkingService;
-        _embeddingService = embeddingService;
-        _vectorStore = vectorStore;
+        _fileStorageService = fileStorageService;
+        _documentProcessingService = documentProcessingService;
     }
 
     public async Task<IReadOnlyList<DocumentListItemDto>> GetDocumentsAsync(
@@ -48,6 +42,7 @@ public sealed class DocumentService : IDocumentService
             filter.ChapterId,
             filter.SearchTerm,
             filter.UploadedByUserId,
+            filter.ViewerUserId,
             cancellationToken);
 
         return documents.Select(MapListItem).ToList();
@@ -55,7 +50,8 @@ public sealed class DocumentService : IDocumentService
 
     public async Task<DocumentDetailsDto?> GetDocumentDetailsAsync(
         int documentId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
         Document? document = await _documentRepository.GetDocumentByIdAsync(
@@ -63,35 +59,44 @@ public sealed class DocumentService : IDocumentService
             includeChunks: true,
             cancellationToken);
 
-        return document is null || document.UploadedByUserId != userId
-            ? null
-            : MapDetails(document);
+        if (document is null || !CanAccessDocument(document, ownerUserId, viewerUserId))
+        {
+            return null;
+        }
+
+        return MapDetails(document);
     }
 
     public async Task<DocumentFileDto?> GetDocumentFileAsync(
         int documentId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
+        // Preview và download đều đi qua đây để dùng chung logic kiểm quyền.
         Document? document = await _documentRepository.GetDocumentByIdAsync(
             documentId,
             includeChunks: false,
             cancellationToken);
 
-        return document is null || document.UploadedByUserId != userId
-            ? null
-            : new DocumentFileDto(
-                document.DocumentId,
-                document.OriginalFileName,
-                document.StoragePath,
-                document.ContentType);
+        if (document is null || !CanAccessDocument(document, ownerUserId, viewerUserId))
+        {
+            return null;
+        }
+
+        return new DocumentFileDto(
+            document.DocumentId,
+            document.OriginalFileName,
+            document.StoragePath,
+            document.ContentType);
     }
 
     public async Task<IReadOnlyList<SubjectOptionDto>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<Subject> subjects = await _documentRepository.GetSubjectsAsync(userId, cancellationToken);
+        IReadOnlyList<Subject> subjects = await _documentRepository.GetSubjectsAsync(ownerUserId, viewerUserId, cancellationToken);
 
         return subjects
             .Select(subject => new SubjectOptionDto(subject.SubjectId, subject.Code, subject.Name))
@@ -100,12 +105,14 @@ public sealed class DocumentService : IDocumentService
 
     public async Task<IReadOnlyList<ChapterOptionDto>> GetChaptersAsync(
         int? subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<Chapter> chapters = await _documentRepository.GetChaptersAsync(
             subjectId,
-            userId,
+            ownerUserId,
+            viewerUserId,
             cancellationToken);
 
         return chapters
@@ -123,24 +130,21 @@ public sealed class DocumentService : IDocumentService
     {
         await ValidateUploadAsync(upload, cancellationToken);
 
-        string originalFileName = Path.GetFileName(upload.OriginalFileName);
-        string fileExtension = Path.GetExtension(originalFileName).ToLowerInvariant();
-        string storedFileName = $"{Guid.NewGuid():N}{fileExtension}";
-        string tempRelativePath = Path.Combine("uploads", "_temp", storedFileName).Replace('\\', '/');
-        string tempPhysicalPath = GetSafePhysicalPath(upload.WebRootPath, tempRelativePath);
-        string? physicalPath = null;
+        // Ghi file tạm trước, chỉ move vào thư mục chính sau khi signature hợp lệ.
+        TempStoredFileDto? tempFile = null;
+        StoredFileDto? storedFile = null;
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(tempPhysicalPath)!);
+            tempFile = await _fileStorageService.SaveUploadTempAsync(
+                upload.WebRootPath,
+                upload.OriginalFileName,
+                upload.FileStream,
+                cancellationToken);
 
-            await using (FileStream output = File.Create(tempPhysicalPath))
+            if (!_fileSignatureValidator.HasValidSignature(tempFile.TempPhysicalPath, tempFile.FileExtension))
             {
-                await upload.FileStream.CopyToAsync(output, cancellationToken);
-            }
-
-            if (!_fileSignatureValidator.HasValidSignature(tempPhysicalPath, fileExtension))
-            {
+                // Không tin extension/content-type nếu nội dung file không mở được đúng định dạng.
                 throw new BusinessValidationException(
                 [
                     new ValidationError("File", "Nội dung file không khớp với định dạng đã chọn.")
@@ -154,15 +158,12 @@ public sealed class DocumentService : IDocumentService
                 cancellationToken);
             await _documentRepository.SaveChangesAsync(cancellationToken);
 
-            string relativePath = Path.Combine(
-                "uploads",
-                upload.UploadedByUserId.ToString(),
-                upload.SubjectId.ToString(),
-                chapter.ChapterId.ToString(),
-                storedFileName).Replace('\\', '/');
-            physicalPath = GetSafePhysicalPath(upload.WebRootPath, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(physicalPath)!);
-            File.Move(tempPhysicalPath, physicalPath, overwrite: true);
+            storedFile = _fileStorageService.MoveTempUploadToDocumentFolder(
+                tempFile,
+                upload.WebRootPath,
+                upload.UploadedByUserId,
+                upload.SubjectId,
+                chapter.ChapterId);
 
             var document = new Document
             {
@@ -171,22 +172,32 @@ public sealed class DocumentService : IDocumentService
                 ChapterId = chapter.ChapterId,
                 Title = upload.Title.Trim(),
                 Description = string.IsNullOrWhiteSpace(upload.Description) ? null : upload.Description.Trim(),
-                OriginalFileName = originalFileName,
-                StoredFileName = storedFileName,
-                StoragePath = relativePath,
+                OriginalFileName = tempFile.OriginalFileName,
+                StoredFileName = tempFile.StoredFileName,
+                StoragePath = storedFile.RelativePath,
                 ContentType = string.IsNullOrWhiteSpace(upload.ContentType)
                     ? "application/octet-stream"
                     : upload.ContentType,
-                FileExtension = fileExtension,
+                FileExtension = tempFile.FileExtension,
                 FileSizeBytes = upload.FileSizeBytes,
                 ProcessingStatus = DocumentProcessingStatus.Uploaded.ToString(),
                 UploadedAt = DateTime.UtcNow
             };
 
-            await ProcessDocumentTextAsync(document, physicalPath, cancellationToken);
+            DocumentTextProcessingResult textProcessingResult = await _documentProcessingService.ExtractAndChunkAsync(
+                storedFile.PhysicalPath,
+                document.FileExtension,
+                document.OriginalFileName,
+                document.Title,
+                cancellationToken);
+            ApplyTextProcessingResult(document, textProcessingResult);
             await _documentRepository.AddDocumentAsync(document, cancellationToken);
             await _documentRepository.SaveChangesAsync(cancellationToken);
-            await StoreVectorsIfReadyAsync(document, upload.WebRootPath, cancellationToken);
+            DocumentVectorProcessingResult vectorProcessingResult = await _documentProcessingService.StoreVectorsIfReadyAsync(
+                document,
+                upload.WebRootPath,
+                cancellationToken);
+            ApplyVectorProcessingResult(document, vectorProcessingResult);
             await _documentRepository.SaveChangesAsync(cancellationToken);
 
             return new DocumentUploadResultDto(
@@ -196,11 +207,14 @@ public sealed class DocumentService : IDocumentService
         }
         catch
         {
-            DeleteFileIfExists(tempPhysicalPath);
-
-            if (physicalPath is not null)
+            if (tempFile is not null)
             {
-                DeleteFileIfExists(physicalPath);
+                _fileStorageService.DeleteFileIfExists(tempFile.TempPhysicalPath);
+            }
+
+            if (storedFile is not null)
+            {
+                _fileStorageService.DeleteFileIfExists(storedFile.PhysicalPath);
             }
 
             throw;
@@ -223,16 +237,12 @@ public sealed class DocumentService : IDocumentService
             return false;
         }
 
-        string physicalPath = GetSafePhysicalPath(webRootPath, document.StoragePath);
+        string physicalPath = _fileStorageService.GetSafePhysicalPath(webRootPath, document.StoragePath);
 
         _documentRepository.DeleteDocument(document);
         await _documentRepository.SaveChangesAsync(cancellationToken);
-        await DeleteVectorsIfExistsAsync(document.DocumentId, webRootPath, cancellationToken);
-
-        if (File.Exists(physicalPath))
-        {
-            File.Delete(physicalPath);
-        }
+        await _documentProcessingService.DeleteVectorsIfExistsAsync(document.DocumentId, webRootPath, cancellationToken);
+        _fileStorageService.DeleteFileIfExists(physicalPath);
 
         return true;
     }
@@ -253,9 +263,10 @@ public sealed class DocumentService : IDocumentService
             return null;
         }
 
-        string physicalPath = GetSafePhysicalPath(webRootPath, document.StoragePath);
+        // Reindex phải dùng lại file gốc đã lưu, không nhận lại file từ client.
+        string physicalPath = _fileStorageService.GetSafePhysicalPath(webRootPath, document.StoragePath);
 
-        if (!File.Exists(physicalPath))
+        if (!_fileStorageService.FileExists(physicalPath))
         {
             throw new BusinessValidationException(
             [
@@ -263,16 +274,26 @@ public sealed class DocumentService : IDocumentService
             ]);
         }
 
-        await DeleteVectorsIfExistsAsync(document.DocumentId, webRootPath, cancellationToken);
+        await _documentProcessingService.DeleteVectorsIfExistsAsync(document.DocumentId, webRootPath, cancellationToken);
         document.DocumentChunks.Clear();
         document.ChunkCount = 0;
         document.ProcessingStatus = DocumentProcessingStatus.Uploaded.ToString();
         document.UpdatedAt = DateTime.UtcNow;
         await _documentRepository.SaveChangesAsync(cancellationToken);
 
-        await ProcessDocumentTextAsync(document, physicalPath, cancellationToken);
+        DocumentTextProcessingResult textProcessingResult = await _documentProcessingService.ExtractAndChunkAsync(
+            physicalPath,
+            document.FileExtension,
+            document.OriginalFileName,
+            document.Title,
+            cancellationToken);
+        ApplyTextProcessingResult(document, textProcessingResult);
         await _documentRepository.SaveChangesAsync(cancellationToken);
-        await StoreVectorsIfReadyAsync(document, webRootPath, cancellationToken);
+        DocumentVectorProcessingResult vectorProcessingResult = await _documentProcessingService.StoreVectorsIfReadyAsync(
+            document,
+            webRootPath,
+            cancellationToken);
+        ApplyVectorProcessingResult(document, vectorProcessingResult);
         await _documentRepository.SaveChangesAsync(cancellationToken);
 
         return new DocumentUploadResultDto(
@@ -428,337 +449,39 @@ public sealed class DocumentService : IDocumentService
         }
     }
 
-    private async Task ProcessDocumentTextAsync(
+    private static void ApplyTextProcessingResult(
         Document document,
-        string physicalPath,
-        CancellationToken cancellationToken)
+        DocumentTextProcessingResult result)
     {
-        try
-        {
-            if (_textExtractor.CanExtract(document.FileExtension))
-            {
-                string text = await _textExtractor.ExtractTextAsync(
-                    physicalPath,
-                    document.FileExtension,
-                    cancellationToken);
+        document.Title = result.Title;
+        document.ProcessingStatus = result.ProcessingStatus;
+        document.DocumentChunks.Clear();
 
-                document.Title = ResolveDocumentTitle(document.Title, document.OriginalFileName, text);
-                IReadOnlyList<TextChunk> chunks = _textChunkingService.Chunk(text);
-                AddChunks(document, chunks);
-            }
-
-            document.ProcessingStatus = DocumentProcessingStatus.Uploaded.ToString();
-        }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            Console.WriteLine($"[Document Processing] Extract/chunk failed for '{document.OriginalFileName}'. {exception.Message}");
-            System.Diagnostics.Debug.WriteLine(exception.ToString());
-            document.ProcessingStatus = DocumentProcessingStatus.Failed.ToString();
-            document.ChunkCount = 0;
-            document.DocumentChunks.Clear();
-        }
-    }
-
-    private async Task StoreVectorsIfReadyAsync(
-        Document document,
-        string storageRootPath,
-        CancellationToken cancellationToken)
-    {
-        if (document.ProcessingStatus == DocumentProcessingStatus.Failed.ToString() ||
-            document.DocumentChunks.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            foreach (DocumentChunk chunk in document.DocumentChunks.OrderBy(chunk => chunk.ChunkIndex))
-            {
-                chunk.VectorId ??= $"vec_{Guid.NewGuid():N}";
-                float[] embedding = await _embeddingService.GenerateEmbeddingAsync(
-                    chunk.Content,
-                    EmbeddingTaskType.RetrievalDocument,
-                    cancellationToken);
-
-                await _vectorStore.UpsertAsync(
-                    new VectorRecord(
-                        chunk.VectorId,
-                        embedding,
-                        document.DocumentId,
-                        chunk.DocumentChunkId),
-                    storageRootPath,
-                    cancellationToken);
-            }
-
-            document.ProcessingStatus = DocumentProcessingStatus.Indexed.ToString();
-            document.UpdatedAt = DateTime.UtcNow;
-        }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            Console.WriteLine($"[Document Processing] Vector indexing failed for DocumentId={document.DocumentId}, File='{document.OriginalFileName}'. {exception.Message}");
-            System.Diagnostics.Debug.WriteLine(exception.ToString());
-            document.ProcessingStatus = DocumentProcessingStatus.Failed.ToString();
-            document.UpdatedAt = DateTime.UtcNow;
-        }
-    }
-
-    private async Task DeleteVectorsIfExistsAsync(
-        int documentId,
-        string storageRootPath,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _vectorStore.DeleteByDocumentIdAsync(documentId, storageRootPath, cancellationToken);
-        }
-        catch when (!cancellationToken.IsCancellationRequested)
-        {
-            // Metadata deletion must not be blocked by a stale local vector-store file.
-        }
-    }
-
-    private static void AddChunks(Document document, IReadOnlyList<TextChunk> chunks)
-    {
-        foreach (TextChunk chunk in chunks)
+        foreach (DocumentChunkProcessingResult chunk in result.Chunks)
         {
             document.DocumentChunks.Add(new DocumentChunk
             {
-                ChunkIndex = chunk.Index,
+                ChunkIndex = chunk.ChunkIndex,
                 Content = chunk.Content,
-                TokenCount = chunk.EstimatedTokenCount,
+                TokenCount = chunk.TokenCount,
                 SectionTitle = chunk.SectionTitle,
-                VectorId = $"vec_{Guid.NewGuid():N}",
-                CreatedAt = DateTime.UtcNow
+                VectorId = chunk.VectorId,
+                CreatedAt = chunk.CreatedAt
             });
         }
 
-        document.ChunkCount = chunks.Count;
+        document.ChunkCount = result.Chunks.Count;
     }
 
-    private static string ResolveDocumentTitle(
-        string currentTitle,
-        string originalFileName,
-        string extractedText)
+    private static void ApplyVectorProcessingResult(
+        Document document,
+        DocumentVectorProcessingResult result)
     {
-        string? titleFromText = ExtractDocumentTitleFromText(extractedText);
+        document.ProcessingStatus = result.ProcessingStatus;
 
-        if (!string.IsNullOrWhiteSpace(titleFromText))
+        if (result.UpdatedAt.HasValue)
         {
-            return titleFromText;
-        }
-
-        string? titleFromFileName = CleanDocumentTitle(Path.GetFileNameWithoutExtension(originalFileName));
-
-        if (!string.IsNullOrWhiteSpace(titleFromFileName))
-        {
-            return titleFromFileName;
-        }
-
-        return string.IsNullOrWhiteSpace(currentTitle)
-            ? "Tài liệu"
-            : currentTitle.Trim();
-    }
-
-    private static string? ExtractDocumentTitleFromText(string extractedText)
-    {
-        string[] candidateLines = extractedText
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(line => Regex.Replace(line, @"\s+", " ").Trim())
-            .Where(line => line.Length > 0)
-            .Take(15)
-            .ToArray();
-
-        foreach (string line in candidateLines)
-        {
-            if (IsGenericDocumentTitle(line))
-            {
-                continue;
-            }
-
-            if (LooksLikeDocumentTitle(line))
-            {
-                return CleanDocumentTitle(line);
-            }
-        }
-
-        string? firstUsefulLine = candidateLines.FirstOrDefault(line => !IsGenericDocumentTitle(line));
-
-        return firstUsefulLine is null ? null : CleanDocumentTitle(firstUsefulLine);
-    }
-
-    private static bool LooksLikeDocumentTitle(string line)
-    {
-        if (line.Length is < 4 or > 180)
-        {
-            return false;
-        }
-
-        if (Regex.IsMatch(line, @"^(?:chapter|chương|chuong)\s+\d+\s*[-–:]", RegexOptions.IgnoreCase))
-        {
-            return false;
-        }
-
-        int wordCount = Regex.Split(line, @"\s+").Count(word => !string.IsNullOrWhiteSpace(word));
-
-        return wordCount is >= 2 and <= 24 &&
-               (!line.EndsWith('.') || UppercaseLetterRatio(line) >= 0.45);
-    }
-
-    private static string? CleanDocumentTitle(string value)
-    {
-        string title = Regex
-            .Replace(value.Replace('_', ' '), @"\s+", " ")
-            .Trim(' ', '-', '–', ':', ';', '.', ',');
-
-        if (title.Length == 0)
-        {
-            return null;
-        }
-
-        string[] dashParts = Regex
-            .Split(title, @"\s+[-–]\s+")
-            .Select(part => part.Trim())
-            .Where(part => part.Length > 0)
-            .ToArray();
-
-        if (dashParts.Length >= 2 && IsGenericTitlePrefix(dashParts[0]))
-        {
-            title = dashParts[^1];
-        }
-
-        title = Regex.Replace(
-            title,
-            @"^(?:tên\s+dự\s+án|ten\s+du\s+an|project|document|tài\s+liệu|tai\s+lieu)\s*[:\-–]\s*",
-            string.Empty,
-            RegexOptions.IgnoreCase);
-        title = Regex.Replace(title, @"\s+", " ").Trim(' ', '-', '–', ':', ';', '.', ',');
-
-        if (title.Length == 0 || IsGenericDocumentTitle(title))
-        {
-            return null;
-        }
-
-        return ToVietnameseTitleCase(title);
-    }
-
-    private static bool IsGenericDocumentTitle(string value)
-    {
-        string normalized = NormalizeForTitleComparison(value);
-
-        string[] genericTitles =
-        [
-            "introduction",
-            "gioi thieu",
-            "muc luc",
-            "noi dung",
-            "table of contents",
-            "document",
-            "tai lieu"
-        ];
-
-        return genericTitles.Any(title => string.Equals(normalized, title, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool IsGenericTitlePrefix(string value)
-    {
-        string normalized = NormalizeForTitleComparison(value);
-
-        string[] genericPrefixes =
-        [
-            "cot truyen",
-            "noi dung",
-            "tai lieu",
-            "workflow",
-            "chapter",
-            "day du",
-            "full"
-        ];
-
-        return genericPrefixes.Any(prefix => normalized.Contains(prefix, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string ToVietnameseTitleCase(string value)
-    {
-        CultureInfo culture = CultureInfo.GetCultureInfo("vi-VN");
-        string normalized = Regex.Replace(value, @"\s+", " ").Trim();
-        bool mostlyUppercase = UppercaseLetterRatio(normalized) >= 0.55;
-
-        if (!mostlyUppercase)
-        {
-            return normalized;
-        }
-
-        string lowered = culture.TextInfo.ToLower(normalized);
-
-        return culture.TextInfo.ToTitleCase(lowered);
-    }
-
-    private static double UppercaseLetterRatio(string value)
-    {
-        int letterCount = 0;
-        int uppercaseCount = 0;
-
-        foreach (char character in value)
-        {
-            if (!char.IsLetter(character))
-            {
-                continue;
-            }
-
-            letterCount++;
-
-            if (char.IsUpper(character))
-            {
-                uppercaseCount++;
-            }
-        }
-
-        return letterCount == 0 ? 0 : (double)uppercaseCount / letterCount;
-    }
-
-    private static string NormalizeForTitleComparison(string value)
-    {
-        string normalized = value.Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-
-        foreach (char character in normalized)
-        {
-            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(character);
-
-            if (category != UnicodeCategory.NonSpacingMark)
-            {
-                builder.Append(char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : ' ');
-            }
-        }
-
-        return Regex
-            .Replace(builder.ToString().Normalize(NormalizationForm.FormC), @"\s+", " ")
-            .Replace('đ', 'd')
-            .Replace('Đ', 'D')
-            .Trim();
-    }
-
-    private static string GetSafePhysicalPath(string webRootPath, string relativePath)
-    {
-        string root = Path.GetFullPath(webRootPath);
-        string combined = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        string fullPath = Path.GetFullPath(combined);
-
-        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Invalid storage path.");
-        }
-
-        return fullPath;
-    }
-
-    private static void DeleteFileIfExists(string physicalPath)
-    {
-        if (File.Exists(physicalPath))
-        {
-            File.Delete(physicalPath);
+            document.UpdatedAt = result.UpdatedAt.Value;
         }
     }
 
@@ -810,5 +533,23 @@ public sealed class DocumentService : IDocumentService
             document.Chapter?.Title,
             document.UploadedByUser?.FullName,
             chunks);
+    }
+
+    private static bool CanAccessDocument(Document document, int? ownerUserId, int? viewerUserId)
+    {
+        if (ownerUserId.HasValue)
+        {
+            // Instructor chỉ xem document do chính mình upload.
+            return document.UploadedByUserId == ownerUserId.Value;
+        }
+
+        if (viewerUserId.HasValue)
+        {
+            // Student chỉ xem document thuộc Subject đã được cấp quyền.
+            return document.Subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value);
+        }
+
+        return false;
     }
 }

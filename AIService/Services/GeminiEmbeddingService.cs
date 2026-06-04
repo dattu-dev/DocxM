@@ -43,6 +43,7 @@ public sealed class GeminiEmbeddingService : IEmbeddingService
                 taskType = MapTaskType(taskType)
             };
 
+            // Gọi Gemini API thật để tạo embedding cho text/câu hỏi.
             using var response = await _client.PostAsync(endpoint, request, cancellationToken);
 
             if (!response.RootElement.TryGetProperty("embedding", out var embedding) ||
@@ -59,6 +60,7 @@ public sealed class GeminiEmbeddingService : IEmbeddingService
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            // Nếu Gemini lỗi tạm thời, chat vẫn có embedding local để tiếp tục demo.
             Console.WriteLine($"[Gemini] Embedding failed, falling back to local embedding. {exception.Message}");
             System.Diagnostics.Debug.WriteLine(exception.ToString());
 

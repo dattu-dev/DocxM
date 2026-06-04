@@ -8,7 +8,10 @@
     <div>
         <h1 class="display-6 mb-0">Quản lý tài liệu</h1>
     </div>
-    <a class="btn btn-primary" asp-action="Create">Tải tài liệu lên</a>
+    @if (User.IsInRole(UserRoles.Instructor))
+    {
+        <a class="btn btn-primary" asp-action="Create">Tải tài liệu lên</a>
+    }
 </div>
 
 @if (TempData["SuccessMessage"] is string successMessage)
@@ -54,8 +57,7 @@
             <colgroup>
                 <col class="documents-col-title" />
                 <col class="documents-col-subject" />
-                <col class="documents-col-user" />
-                <col class="documents-col-count" />
+                <col class="documents-col-status" />
                 <col class="documents-col-date" />
                 <col class="documents-col-actions" />
             </colgroup>
@@ -63,8 +65,7 @@
                 <tr>
                     <th>Tài liệu</th>
                     <th>Môn / chương</th>
-                    <th>Người upload</th>
-                    <th class="text-center">Số đoạn</th>
+                    <th>Trạng thái</th>
                     <th>Ngày tải lên</th>
                     <th class="text-end">Thao tác</th>
                 </tr>
@@ -73,7 +74,7 @@
             @if (Model.Documents.Count == 0)
             {
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-5">
+                    <td colspan="5" class="text-center text-muted py-5">
                         Chưa có tài liệu nào. Hãy tải PDF, DOCX hoặc PPTX đầu tiên.
                     </td>
                 </tr>
@@ -92,21 +93,34 @@
                             <div>@document.SubjectName</div>
                             <div class="small text-muted">@(document.ChapterTitle ?? "Không gắn chương")</div>
                         </td>
-                        <td>@(document.UploadedByFullName ?? "Không xác định")</td>
-                        <td class="text-center">@document.ChunkCount</td>
+                        <td>
+                            <span class="badge @GetStatusBadge(document.ProcessingStatus)">
+                                @GetStatusLabel(document.ProcessingStatus)
+                            </span>
+                        </td>
                         <td>@document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy")</td>
                         <td class="text-end">
                             <div class="document-actions">
-                                <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@document.DocumentId">Chi tiết</a>
-                                <a class="btn btn-sm btn-outline-secondary" asp-action="Download" asp-route-id="@document.DocumentId">Tải file</a>
-                                <form asp-action="ReIndex" asp-route-id="@document.DocumentId" method="post"
-                                      onsubmit="return confirm('Xử lý lại tài liệu này?');">
-                                    <button class="btn btn-sm btn-outline-warning btn-reindex" type="submit">Xử lý lại</button>
-                                </form>
-                                <form asp-action="Delete" asp-route-id="@document.DocumentId" method="post"
-                                      onsubmit="return confirm('Xóa tài liệu này?');">
-                                    <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
-                                </form>
+                                <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@document.DocumentId">Xem</a>
+                                @if (IsPdf(document.FileExtension))
+                                {
+                                    <a class="btn btn-sm btn-outline-dark" asp-action="Preview" asp-route-id="@document.DocumentId">Xem trước</a>
+                                }
+                                <a class="btn btn-sm btn-outline-secondary" asp-action="Download" asp-route-id="@document.DocumentId">Tải file gốc</a>
+                                @if (User.IsInRole(UserRoles.Instructor) && IsProcessingFailed(document.ProcessingStatus))
+                                {
+                                    <form asp-action="ReIndex" asp-route-id="@document.DocumentId" method="post"
+                                          onsubmit="return confirm('Thử xử lý lại tài liệu này?');">
+                                        <button class="btn btn-sm btn-outline-warning btn-reindex" type="submit">Thử xử lý lại</button>
+                                    </form>
+                                }
+                                @if (User.IsInRole(UserRoles.Instructor))
+                                {
+                                    <form asp-action="Delete" asp-route-id="@document.DocumentId" method="post"
+                                          onsubmit="return confirm('Xóa tài liệu này?');">
+                                        <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
+                                    </form>
+                                }
                             </div>
                         </td>
                     </tr>
@@ -131,5 +145,38 @@
         }
 
         return $"{size:0.##} {units[unit]}";
+    }
+
+    private static bool IsProcessingFailed(string status)
+    {
+        return status is "Failed" or "Error";
+    }
+
+    private static bool IsPdf(string fileExtension)
+    {
+        return string.Equals(fileExtension, ".pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetStatusBadge(string status)
+    {
+        return status switch
+        {
+            "Ready" or "Indexed" or "Completed" => "text-bg-success",
+            "Failed" or "Error" => "text-bg-danger",
+            "Pending" or "Processing" => "text-bg-info",
+            _ => "text-bg-secondary"
+        };
+    }
+
+    private static string GetStatusLabel(string status)
+    {
+        return status switch
+        {
+            "Pending" or "Processing" => "Đang xử lý",
+            "Ready" or "Indexed" or "Completed" => "Sẵn sàng",
+            "Failed" or "Error" => "Lỗi xử lý",
+            "NotIndexed" or "Uploaded" => "Chưa xử lý",
+            _ => status
+        };
     }
 }

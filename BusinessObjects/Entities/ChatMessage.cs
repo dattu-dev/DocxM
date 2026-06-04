@@ -14,5 +14,6 @@ public sealed class ChatMessage
 
     public ChatConversation ChatConversation { get; set; } = null!;
 
+    // Citation tách riêng để UI hiển thị nguồn mà không trộn vào nội dung trả lời.
     public ICollection<ChatCitation> ChatCitations { get; set; } = new List<ChatCitation>();
 }

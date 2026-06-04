@@ -26,6 +26,7 @@ public partial class AppDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Phần này là mapping database-first; business rule chính nằm ở service/repository.
         modelBuilder.Entity<Chapter>(entity =>
         {
             entity.HasIndex(e => e.SubjectId, "IX_Chapters_SubjectId");

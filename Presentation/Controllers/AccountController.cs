@@ -75,6 +75,7 @@ public sealed class AccountController : Controller
 
         try
         {
+            // Register không nhận role từ form; role mặc định được quyết định trong AuthService.
             AuthenticatedUserDto user = await _authService.RegisterAsync(
                 new RegisterDto(
                     viewModel.UserName,
@@ -115,11 +116,13 @@ public sealed class AccountController : Controller
 
     private async Task SignInUserAsync(AuthenticatedUserDto user)
     {
+        // Claims là nguồn role/user id cho các controller và CurrentUserService.
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
             new(ClaimTypes.Name, user.UserName),
             new(ClaimTypes.Email, user.Email),
+            new(ClaimTypes.Role, user.Role),
             new("FullName", user.FullName)
         };
 

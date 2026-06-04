@@ -13,30 +13,64 @@ public sealed class SubjectRepository : ISubjectRepository
     }
 
     public async Task<IReadOnlyList<Subject>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        return await _context.Subjects
+        IQueryable<Subject> query = _context.Subjects
             .AsNoTracking()
             .Include(subject => subject.Chapters)
             .Include(subject => subject.Documents)
-            .Where(subject => subject.CreatedByUserId == userId)
+            .Where(subject => subject.IsActive);
+
+        if (ownerUserId.HasValue)
+        {
+            // Instructor chỉ thấy Subject do mình tạo.
+            query = query.Where(subject => subject.CreatedByUserId == ownerUserId.Value);
+        }
+        else if (viewerUserId.HasValue)
+        {
+            // Student chỉ thấy Subject được cấp quyền trong SubjectPermissions.
+            query = query.Where(subject => subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value));
+        }
+        else
+        {
+            query = query.Where(subject => false);
+        }
+
+        return await query
             .OrderBy(subject => subject.Name)
             .ToListAsync(cancellationToken);
     }
 
     public Task<Subject?> GetSubjectByIdAsync(
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        return _context.Subjects
+        IQueryable<Subject> query = _context.Subjects
             .Include(subject => subject.Chapters)
                 .ThenInclude(chapter => chapter.Documents)
             .Include(subject => subject.Documents)
-            .FirstOrDefaultAsync(
-                subject => subject.SubjectId == subjectId && subject.CreatedByUserId == userId,
-                cancellationToken);
+            .Where(subject => subject.SubjectId == subjectId && subject.IsActive);
+
+        if (ownerUserId.HasValue)
+        {
+            query = query.Where(subject => subject.CreatedByUserId == ownerUserId.Value);
+        }
+        else if (viewerUserId.HasValue)
+        {
+            query = query.Where(subject => subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value));
+        }
+        else
+        {
+            query = query.Where(subject => false);
+        }
+
+        return query.FirstOrDefaultAsync(cancellationToken);
     }
 
     public Task<bool> SubjectNameExistsAsync(
@@ -64,6 +98,49 @@ public sealed class SubjectRepository : ISubjectRepository
     public void DeleteSubject(Subject subject)
     {
         _context.Subjects.Remove(subject);
+    }
+
+    public async Task<IReadOnlyList<SubjectPermission>> GetSubjectPermissionsAsync(
+        int subjectId,
+        int ownerUserId,
+        CancellationToken cancellationToken = default)
+    {
+        // Danh sách quyền chỉ mở cho Instructor sở hữu Subject.
+        return await _context.SubjectPermissions
+            .AsNoTracking()
+            .Include(permission => permission.StudentUser)
+            .Where(permission => permission.SubjectId == subjectId &&
+                                 permission.Subject.CreatedByUserId == ownerUserId)
+            .OrderBy(permission => permission.StudentUser.FullName)
+            .ThenBy(permission => permission.StudentUser.Email)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<SubjectPermission?> GetSubjectPermissionAsync(
+        int subjectId,
+        int ownerUserId,
+        int studentUserId,
+        CancellationToken cancellationToken = default)
+    {
+        return _context.SubjectPermissions
+            .Include(permission => permission.Subject)
+            .FirstOrDefaultAsync(
+                permission => permission.SubjectId == subjectId &&
+                              permission.Subject.CreatedByUserId == ownerUserId &&
+                              permission.StudentUserId == studentUserId,
+                cancellationToken);
+    }
+
+    public async Task AddSubjectPermissionAsync(
+        SubjectPermission permission,
+        CancellationToken cancellationToken = default)
+    {
+        await _context.SubjectPermissions.AddAsync(permission, cancellationToken);
+    }
+
+    public void DeleteSubjectPermission(SubjectPermission permission)
+    {
+        _context.SubjectPermissions.Remove(permission);
     }
 
     public async Task<IReadOnlyList<Chapter>> GetChaptersAsync(

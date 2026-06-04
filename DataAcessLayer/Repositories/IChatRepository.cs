@@ -5,55 +5,65 @@ namespace DataAcessLayer.Repositories;
 public interface IChatRepository
 {
     Task<IReadOnlyList<Subject>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Chapter>> GetChaptersAsync(
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Document>> GetIndexedDocumentsAsync(
         int? subjectId,
         int? chapterId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Document>> GetDocumentsAsync(
         int? subjectId,
         int? chapterId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<Subject?> GetSubjectAsync(
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<Chapter?> GetChapterAsync(
         int chapterId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<Document?> GetDocumentAsync(
         int documentId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DocumentChunk>> GetChunksByIdsAsync(
         IReadOnlyCollection<long> chunkIds,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DocumentChunk>> GetChunksByDocumentIdsAsync(
         IReadOnlyCollection<int> documentIds,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         int take,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DocumentChunk>> SearchChunksByKeywordsAsync(
         IReadOnlyCollection<int> documentIds,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         IReadOnlyCollection<string> keywords,
         int take,
         CancellationToken cancellationToken = default);

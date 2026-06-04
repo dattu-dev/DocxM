@@ -19,6 +19,7 @@ public sealed class LocalJsonVectorStore : IVectorStore
     {
         string storePath = GetStorePath(storageRootPath);
 
+        // Local JSON store dùng lock để tránh ghi đè file khi nhiều request cùng index/search.
         await FileLock.WaitAsync(cancellationToken);
 
         try
@@ -59,6 +60,7 @@ public sealed class LocalJsonVectorStore : IVectorStore
             HashSet<int> allowedDocumentIds = documentIds.ToHashSet();
             List<VectorRecord> vectors = await ReadVectorsAsync(storePath, cancellationToken);
 
+            // Vector search chỉ chạy trên document ids đã được kiểm quyền ở ChatService.
             return vectors
                 .Where(vector => allowedDocumentIds.Contains(vector.DocumentId))
                 .Select(vector => new VectorSearchResult(vector, CosineSimilarity(queryVector, vector.EmbeddingVector)))

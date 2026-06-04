@@ -29,6 +29,7 @@ public sealed class GeminiApiClient
         httpRequest.Headers.Add("x-goog-api-key", _options.ApiKey);
         httpRequest.Content = JsonContent.Create(request, options: SerializerOptions);
 
+        // Gửi request sang Gemini API.
         using HttpResponseMessage response = await _httpClient.SendAsync(httpRequest, cancellationToken);
         string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 

@@ -15,4 +15,5 @@ public sealed record AuthenticatedUserDto(
     int UserId,
     string UserName,
     string Email,
-    string FullName);
+    string FullName,
+    string Role);

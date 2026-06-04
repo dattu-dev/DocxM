@@ -4,7 +4,8 @@ public sealed record DocumentFilterDto(
     int? SubjectId,
     int? ChapterId,
     string? SearchTerm,
-    int? UploadedByUserId = null);
+    int? UploadedByUserId = null,
+    int? ViewerUserId = null);
 
 public sealed record DocumentListItemDto(
     int DocumentId,

@@ -4,9 +4,16 @@ namespace DataAcessLayer.Repositories;
 
 public interface ISubjectRepository
 {
-    Task<IReadOnlyList<Subject>> GetSubjectsAsync(int userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Subject>> GetSubjectsAsync(
+        int? ownerUserId,
+        int? viewerUserId,
+        CancellationToken cancellationToken = default);
 
-    Task<Subject?> GetSubjectByIdAsync(int subjectId, int userId, CancellationToken cancellationToken = default);
+    Task<Subject?> GetSubjectByIdAsync(
+        int subjectId,
+        int? ownerUserId,
+        int? viewerUserId,
+        CancellationToken cancellationToken = default);
 
     Task<bool> SubjectNameExistsAsync(
         string name,
@@ -17,6 +24,21 @@ public interface ISubjectRepository
     Task AddSubjectAsync(Subject subject, CancellationToken cancellationToken = default);
 
     void DeleteSubject(Subject subject);
+
+    Task<IReadOnlyList<SubjectPermission>> GetSubjectPermissionsAsync(
+        int subjectId,
+        int ownerUserId,
+        CancellationToken cancellationToken = default);
+
+    Task<SubjectPermission?> GetSubjectPermissionAsync(
+        int subjectId,
+        int ownerUserId,
+        int studentUserId,
+        CancellationToken cancellationToken = default);
+
+    Task AddSubjectPermissionAsync(SubjectPermission permission, CancellationToken cancellationToken = default);
+
+    void DeleteSubjectPermission(SubjectPermission permission);
 
     Task<IReadOnlyList<Chapter>> GetChaptersAsync(int subjectId, int userId, CancellationToken cancellationToken = default);
 

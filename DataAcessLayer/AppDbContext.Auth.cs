@@ -7,6 +7,8 @@ public partial class AppDbContext
 {
     public virtual DbSet<AppUser> AppUsers { get; set; }
 
+    public virtual DbSet<SubjectPermission> SubjectPermissions { get; set; }
+
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AppUser>(entity =>
@@ -20,6 +22,8 @@ public partial class AppDbContext
             entity.Property(user => user.Email).HasMaxLength(256);
             entity.Property(user => user.NormalizedEmail).HasMaxLength(256);
             entity.Property(user => user.FullName).HasMaxLength(150);
+            // Database cũng default Student để đồng bộ với logic đăng ký.
+            entity.Property(user => user.Role).HasMaxLength(30).HasDefaultValue("Student");
             entity.Property(user => user.PasswordHash).HasMaxLength(500);
             entity.Property(user => user.IsActive).HasDefaultValue(true);
             entity.Property(user => user.CreatedAt)
@@ -45,6 +49,39 @@ public partial class AppDbContext
                 .WithMany(user => user.Subjects)
                 .HasForeignKey(subject => subject.CreatedByUserId)
                 .HasConstraintName("FK_Subjects_AppUsers");
+        });
+
+        modelBuilder.Entity<SubjectPermission>(entity =>
+        {
+            entity.HasKey(permission => permission.SubjectPermissionId);
+            // Một Student chỉ cần một quyền trên mỗi Subject.
+            entity.HasIndex(
+                    permission => new { permission.SubjectId, permission.StudentUserId },
+                    "UX_SubjectPermissions_Subject_Student")
+                .IsUnique();
+            entity.HasIndex(permission => permission.StudentUserId, "IX_SubjectPermissions_StudentUserId");
+            entity.HasIndex(permission => permission.GrantedByUserId, "IX_SubjectPermissions_GrantedByUserId");
+            entity.Property(permission => permission.GrantedAt)
+                .HasPrecision(0)
+                .HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(permission => permission.Subject)
+                .WithMany(subject => subject.SubjectPermissions)
+                .HasForeignKey(permission => permission.SubjectId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_SubjectPermissions_Subjects");
+
+            entity.HasOne(permission => permission.StudentUser)
+                .WithMany(user => user.SubjectPermissions)
+                .HasForeignKey(permission => permission.StudentUserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_SubjectPermissions_StudentUsers");
+
+            entity.HasOne(permission => permission.GrantedByUser)
+                .WithMany(user => user.GrantedSubjectPermissions)
+                .HasForeignKey(permission => permission.GrantedByUserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_SubjectPermissions_GrantedByUsers");
         });
 
         modelBuilder.Entity<DocumentChunk>(entity =>

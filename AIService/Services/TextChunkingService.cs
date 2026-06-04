@@ -30,6 +30,7 @@ public sealed class TextChunkingService : ITextChunkingService
 
             if (isHeading)
             {
+                // Heading được giữ làm section title để citation/context dễ hiểu hơn.
                 if (buffer.Count >= DefaultMaxWords - DefaultOverlapWords && hasNewContentSinceLastChunk)
                 {
                     AddChunk(chunks, buffer, currentSectionTitle, ref chunkIndex);
@@ -103,6 +104,7 @@ public sealed class TextChunkingService : ITextChunkingService
 
     private static void KeepOverlap(List<string> words)
     {
+        // Overlap giúp câu trả lời không mất ngữ cảnh ở ranh giới hai chunk.
         if (words.Count <= DefaultOverlapWords)
         {
             return;

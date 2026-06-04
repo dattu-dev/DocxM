@@ -17,6 +17,7 @@ public sealed class DocumentRepository : IDocumentRepository
         int? chapterId,
         string? searchTerm,
         int? uploadedByUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
         IQueryable<Document> query = _context.Documents
@@ -37,7 +38,18 @@ public sealed class DocumentRepository : IDocumentRepository
 
         if (uploadedByUserId.HasValue)
         {
+            // Instructor chỉ liệt kê document do mình upload.
             query = query.Where(document => document.UploadedByUserId == uploadedByUserId.Value);
+        }
+        else if (viewerUserId.HasValue)
+        {
+            // Student chỉ liệt kê document thuộc Subject đã được cấp quyền.
+            query = query.Where(document => document.Subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value));
+        }
+        else
+        {
+            query = query.Where(document => false);
         }
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
@@ -60,8 +72,10 @@ public sealed class DocumentRepository : IDocumentRepository
         bool includeChunks,
         CancellationToken cancellationToken = default)
     {
+        // Include SubjectPermissions để service có đủ dữ liệu kiểm quyền chi tiết.
         IQueryable<Document> query = _context.Documents
             .Include(document => document.Subject)
+                .ThenInclude(subject => subject.SubjectPermissions)
             .Include(document => document.Chapter)
             .Include(document => document.UploadedByUser);
 
@@ -76,25 +90,57 @@ public sealed class DocumentRepository : IDocumentRepository
     }
 
     public async Task<IReadOnlyList<Subject>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
-        return await _context.Subjects
+        IQueryable<Subject> query = _context.Subjects
             .AsNoTracking()
-            .Where(subject => subject.IsActive && subject.CreatedByUserId == userId)
+            .Where(subject => subject.IsActive);
+
+        if (ownerUserId.HasValue)
+        {
+            query = query.Where(subject => subject.CreatedByUserId == ownerUserId.Value);
+        }
+        else if (viewerUserId.HasValue)
+        {
+            query = query.Where(subject => subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value));
+        }
+        else
+        {
+            query = query.Where(subject => false);
+        }
+
+        return await query
             .OrderBy(subject => subject.Code)
             .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<Chapter>> GetChaptersAsync(
         int? subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default)
     {
         IQueryable<Chapter> query = _context.Chapters
             .AsNoTracking()
             .Include(chapter => chapter.Subject)
-            .Where(chapter => chapter.Subject.CreatedByUserId == userId);
+            .Where(chapter => chapter.Subject.IsActive);
+
+        if (ownerUserId.HasValue)
+        {
+            query = query.Where(chapter => chapter.Subject.CreatedByUserId == ownerUserId.Value);
+        }
+        else if (viewerUserId.HasValue)
+        {
+            query = query.Where(chapter => chapter.Subject.SubjectPermissions.Any(
+                permission => permission.StudentUserId == viewerUserId.Value));
+        }
+        else
+        {
+            query = query.Where(chapter => false);
+        }
 
         if (subjectId.HasValue)
         {

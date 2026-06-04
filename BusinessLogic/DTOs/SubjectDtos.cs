@@ -21,6 +21,22 @@ public sealed record SubjectUpsertDto(
     string Name,
     string? Description);
 
+public sealed record SubjectPermissionsDto(
+    int SubjectId,
+    string SubjectName,
+    IReadOnlyList<SubjectPermissionListItemDto> Students);
+
+public sealed record SubjectPermissionListItemDto(
+    int StudentUserId,
+    string FullName,
+    string Email,
+    DateTime GrantedAt);
+
+public sealed record SubjectPermissionGrantDto(
+    int SubjectId,
+    int InstructorUserId,
+    string StudentEmail);
+
 public sealed record ChapterListItemDto(
     int ChapterId,
     int SubjectId,

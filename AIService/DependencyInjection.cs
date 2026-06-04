@@ -20,12 +20,14 @@ public static class DependencyInjection
 
         if (geminiOptions.IsConfigured)
         {
+            // Khi có Gemini config hợp lệ, dùng Gemini cho embedding và sinh câu trả lời.
             services.AddSingleton<GeminiApiClient>();
             services.AddScoped<IEmbeddingService, GeminiEmbeddingService>();
             services.AddScoped<IAnswerGenerationService, GeminiAnswerGenerationService>();
         }
         else
         {
+            // Fallback local giúp môi trường dev/demo chạy được mà không cần API key.
             services.AddScoped<IEmbeddingService, DeterministicEmbeddingService>();
             services.AddScoped<IAnswerGenerationService, PromptAnswerGenerationService>();
         }

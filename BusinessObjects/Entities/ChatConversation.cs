@@ -6,6 +6,7 @@ public sealed class ChatConversation
 
     public int UserId { get; set; }
 
+    // Scope lưu lại phạm vi chat để không reuse conversation sai quyền.
     public int? SubjectId { get; set; }
 
     public int? ChapterId { get; set; }

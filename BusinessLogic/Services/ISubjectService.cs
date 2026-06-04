@@ -5,12 +5,14 @@ namespace BusinessLogic.Services;
 public interface ISubjectService
 {
     Task<IReadOnlyList<SubjectListItemDto>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<SubjectDetailsDto?> GetSubjectDetailsAsync(
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<int> CreateSubjectAsync(
@@ -24,6 +26,21 @@ public interface ISubjectService
     Task<bool> DeleteSubjectAsync(
         int subjectId,
         int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<SubjectPermissionsDto?> GetSubjectPermissionsAsync(
+        int subjectId,
+        int instructorUserId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> GrantSubjectPermissionAsync(
+        SubjectPermissionGrantDto dto,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> RevokeSubjectPermissionAsync(
+        int subjectId,
+        int instructorUserId,
+        int studentUserId,
         CancellationToken cancellationToken = default);
 
     Task<bool> DeleteChapterAsync(

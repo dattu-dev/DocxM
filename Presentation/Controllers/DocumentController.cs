@@ -1,11 +1,12 @@
-using System.Security.Claims;
 using BusinessLogic.DTOs;
 using BusinessLogic.Services;
 using BusinessLogic.Validation;
+using BusinessObjects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Presentation.Models;
+using Presentation.Services;
 
 namespace Presentation.Controllers;
 
@@ -13,14 +14,20 @@ namespace Presentation.Controllers;
 public sealed class DocumentController : Controller
 {
     private readonly IDocumentService _documentService;
+    private readonly IFileStorageService _fileStorageService;
     private readonly IWebHostEnvironment _environment;
+    private readonly ICurrentUserService _currentUser;
 
     public DocumentController(
         IDocumentService documentService,
-        IWebHostEnvironment environment)
+        IFileStorageService fileStorageService,
+        IWebHostEnvironment environment,
+        ICurrentUserService currentUser)
     {
         _documentService = documentService;
+        _fileStorageService = fileStorageService;
         _environment = environment;
+        _currentUser = currentUser;
     }
 
     public async Task<IActionResult> Index(
@@ -32,7 +39,6 @@ public sealed class DocumentController : Controller
         subjectId = subjectId is > 0 ? subjectId : null;
         chapterId = chapterId is > 0 ? chapterId : null;
         searchTerm = NormalizeSearchTerm(searchTerm);
-        int currentUserId = GetCurrentUserId();
 
         if (searchTerm?.Length > 100)
         {
@@ -40,9 +46,14 @@ public sealed class DocumentController : Controller
             searchTerm = searchTerm[..100];
         }
 
-        chapterId = await NormalizeChapterFilterAsync(subjectId, chapterId, currentUserId, cancellationToken);
+        chapterId = await NormalizeChapterFilterAsync(subjectId, chapterId, cancellationToken);
 
-        var filter = new DocumentFilterDto(subjectId, chapterId, searchTerm, currentUserId);
+        var filter = new DocumentFilterDto(
+            subjectId,
+            chapterId,
+            searchTerm,
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId());
 
         var viewModel = new DocumentIndexViewModel
         {
@@ -57,6 +68,7 @@ public sealed class DocumentController : Controller
         return View(viewModel);
     }
 
+    [Authorize(Roles = UserRoles.Instructor)]
     public async Task<IActionResult> Create(CancellationToken cancellationToken)
     {
         var viewModel = new DocumentUploadViewModel();
@@ -65,6 +77,7 @@ public sealed class DocumentController : Controller
         return View(viewModel);
     }
 
+    [Authorize(Roles = UserRoles.Instructor)]
     [HttpPost]
     [ValidateAntiForgeryToken]
     [RequestSizeLimit(DocumentUploadRules.MaxFileSizeBytes)]
@@ -87,10 +100,11 @@ public sealed class DocumentController : Controller
         {
             await using Stream stream = viewModel.File.OpenReadStream();
 
+            // Upload luôn gắn với Instructor hiện tại để service kiểm tra quyền sở hữu Subject.
             DocumentUploadResultDto result = await _documentService.UploadDocumentAsync(
                 new DocumentUploadDto
                 {
-                    UploadedByUserId = GetCurrentUserId(),
+                    UploadedByUserId = _currentUser.UserId,
                     SubjectId = viewModel.SubjectId,
                     ChapterTitle = viewModel.ChapterTitle,
                     Title = viewModel.Title,
@@ -104,7 +118,7 @@ public sealed class DocumentController : Controller
                 cancellationToken);
 
             TempData["SuccessMessage"] =
-                $"Đã tải tài liệu lên. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}, số đoạn: {result.ChunkCount}.";
+                $"Đã tải tài liệu lên. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}.";
 
             return RedirectToAction(nameof(Details), new { id = result.DocumentId });
         }
@@ -132,7 +146,8 @@ public sealed class DocumentController : Controller
     {
         DocumentDetailsDto? document = await _documentService.GetDocumentDetailsAsync(
             id,
-            GetCurrentUserId(),
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
             cancellationToken);
 
         if (document is null)
@@ -145,9 +160,11 @@ public sealed class DocumentController : Controller
 
     public async Task<IActionResult> Download(int id, CancellationToken cancellationToken)
     {
+        // Download dùng chung service kiểm quyền với preview để không expose file path thật.
         DocumentFileDto? file = await _documentService.GetDocumentFileAsync(
             id,
-            GetCurrentUserId(),
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
             cancellationToken);
 
         if (file is null)
@@ -155,9 +172,9 @@ public sealed class DocumentController : Controller
             return NotFound();
         }
 
-        string physicalPath = GetSafePhysicalPath(file.StoragePath);
+        string physicalPath = _fileStorageService.GetSafePhysicalPath(GetWebRootPath(), file.StoragePath);
 
-        if (!System.IO.File.Exists(physicalPath))
+        if (!_fileStorageService.FileExists(physicalPath))
         {
             return NotFound();
         }
@@ -165,13 +182,47 @@ public sealed class DocumentController : Controller
         return PhysicalFile(physicalPath, file.ContentType, file.OriginalFileName);
     }
 
+    public async Task<IActionResult> Preview(int id, CancellationToken cancellationToken)
+    {
+        // Preview hiện chỉ mở PDF sau khi document đã qua kiểm tra quyền.
+        DocumentFileDto? file = await _documentService.GetDocumentFileAsync(
+            id,
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
+            cancellationToken);
+
+        if (file is null)
+        {
+            return NotFound();
+        }
+
+        if (!IsPdf(file.OriginalFileName))
+        {
+            TempData["ErrorMessage"] = "Định dạng này chưa hỗ trợ xem trước, vui lòng tải file về.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        string physicalPath = _fileStorageService.GetSafePhysicalPath(GetWebRootPath(), file.StoragePath);
+
+        if (!_fileStorageService.FileExists(physicalPath))
+        {
+            return NotFound();
+        }
+
+        return new PhysicalFileResult(physicalPath, "application/pdf")
+        {
+            EnableRangeProcessing = true
+        };
+    }
+
+    [Authorize(Roles = UserRoles.Instructor)]
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
     {
         bool deleted = await _documentService.DeleteDocumentAsync(
             id,
-            GetCurrentUserId(),
+            _currentUser.UserId,
             GetWebRootPath(),
             cancellationToken);
 
@@ -182,6 +233,7 @@ public sealed class DocumentController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [Authorize(Roles = UserRoles.Instructor)]
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ReIndex(int id, CancellationToken cancellationToken)
@@ -190,13 +242,13 @@ public sealed class DocumentController : Controller
         {
             DocumentUploadResultDto? result = await _documentService.ReIndexDocumentAsync(
                 id,
-                GetCurrentUserId(),
+                _currentUser.UserId,
                 GetWebRootPath(),
                 cancellationToken);
 
             TempData[result is null ? "ErrorMessage" : "SuccessMessage"] = result is null
                 ? "Không tìm thấy tài liệu cần xử lý lại."
-                : $"Đã xử lý lại tài liệu. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}, số đoạn: {result.ChunkCount}.";
+                : $"Đã xử lý lại tài liệu. Trạng thái: {GetProcessingStatusLabel(result.ProcessingStatus)}.";
         }
         catch (BusinessValidationException ex)
         {
@@ -230,7 +282,8 @@ public sealed class DocumentController : Controller
         CancellationToken cancellationToken)
     {
         IReadOnlyList<SubjectOptionDto> subjects = await _documentService.GetSubjectsAsync(
-            GetCurrentUserId(),
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
             cancellationToken);
 
         var items = new List<SelectListItem>
@@ -263,7 +316,8 @@ public sealed class DocumentController : Controller
 
         IReadOnlyList<ChapterOptionDto> chapters = await _documentService.GetChaptersAsync(
             selectedSubjectId,
-            GetCurrentUserId(),
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
             cancellationToken);
 
         items.AddRange(chapters.Select(chapter => new SelectListItem(
@@ -277,7 +331,6 @@ public sealed class DocumentController : Controller
     private async Task<int?> NormalizeChapterFilterAsync(
         int? subjectId,
         int? chapterId,
-        int userId,
         CancellationToken cancellationToken)
     {
         if (!subjectId.HasValue || !chapterId.HasValue)
@@ -287,7 +340,8 @@ public sealed class DocumentController : Controller
 
         IReadOnlyList<ChapterOptionDto> subjectChapters = await _documentService.GetChaptersAsync(
             subjectId,
-            userId,
+            GetOwnerFilterUserId(),
+            GetViewerFilterUserId(),
             cancellationToken);
 
         return subjectChapters.Any(chapter => chapter.ChapterId == chapterId.Value)
@@ -302,30 +356,16 @@ public sealed class DocumentController : Controller
             : _environment.WebRootPath;
     }
 
-    private string GetSafePhysicalPath(string relativePath)
+    private int? GetOwnerFilterUserId()
     {
-        string root = Path.GetFullPath(GetWebRootPath());
-        string fullPath = Path.GetFullPath(
-            Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-
-        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Invalid storage path.");
-        }
-
-        return fullPath;
+        // Instructor chỉ lọc document do mình upload.
+        return _currentUser.IsInstructor ? _currentUser.UserId : null;
     }
 
-    private int GetCurrentUserId()
+    private int? GetViewerFilterUserId()
     {
-        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        if (!int.TryParse(userId, out int parsedUserId))
-        {
-            throw new InvalidOperationException("Không xác định được người dùng hiện tại.");
-        }
-
-        return parsedUserId;
+        // Student chỉ lọc document thuộc Subject được cấp quyền.
+        return _currentUser.IsStudent ? _currentUser.UserId : null;
     }
 
     private static string? NormalizeSearchTerm(string? searchTerm)
@@ -338,13 +378,19 @@ public sealed class DocumentController : Controller
         return searchTerm.Trim();
     }
 
+    private static bool IsPdf(string fileName)
+    {
+        return string.Equals(Path.GetExtension(fileName), ".pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string GetProcessingStatusLabel(string status)
     {
         return status switch
         {
-            "Indexed" => "Đã xử lý",
-            "Failed" => "Lỗi xử lý",
-            "Uploaded" => "Đã tải lên",
+            "Pending" or "Processing" => "Đang xử lý",
+            "Ready" or "Indexed" or "Completed" => "Sẵn sàng",
+            "Failed" or "Error" => "Lỗi xử lý",
+            "NotIndexed" or "Uploaded" => "Chưa xử lý",
             _ => status
         };
     }

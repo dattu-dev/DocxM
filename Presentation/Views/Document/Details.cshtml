@@ -10,21 +10,36 @@
         <h1 class="display-6 mt-2 mb-0">@Model.Document.Title</h1>
     </div>
     <div class="d-flex gap-2">
+        @if (IsPdf(Model.Document.FileExtension))
+        {
+            <a class="btn btn-outline-dark" asp-action="Preview" asp-route-id="@Model.Document.DocumentId">Xem trước</a>
+        }
         <a class="btn btn-outline-secondary" asp-action="Download" asp-route-id="@Model.Document.DocumentId">Tải file gốc</a>
-        <form asp-action="ReIndex" asp-route-id="@Model.Document.DocumentId" method="post"
-              onsubmit="return confirm('Xử lý lại tài liệu này?');">
-            <button class="btn btn-outline-warning" type="submit">Xử lý lại</button>
-        </form>
-        <form asp-action="Delete" asp-route-id="@Model.Document.DocumentId" method="post"
-              onsubmit="return confirm('Xóa tài liệu này?');">
-            <button class="btn btn-outline-danger" type="submit">Xóa</button>
-        </form>
+        @if (User.IsInRole(UserRoles.Instructor) && IsProcessingFailed(Model.Document.ProcessingStatus))
+        {
+            <form asp-action="ReIndex" asp-route-id="@Model.Document.DocumentId" method="post"
+                  onsubmit="return confirm('Thử xử lý lại tài liệu này?');">
+                <button class="btn btn-outline-warning" type="submit">Thử xử lý lại</button>
+            </form>
+        }
+        @if (User.IsInRole(UserRoles.Instructor))
+        {
+            <form asp-action="Delete" asp-route-id="@Model.Document.DocumentId" method="post"
+                  onsubmit="return confirm('Xóa tài liệu này?');">
+                <button class="btn btn-outline-danger" type="submit">Xóa</button>
+            </form>
+        }
     </div>
 </div>
 
 @if (TempData["SuccessMessage"] is string successMessage)
 {
     <div class="alert alert-success">@successMessage</div>
+}
+
+@if (TempData["ErrorMessage"] is string errorMessage)
+{
+    <div class="alert alert-danger">@errorMessage</div>
 }
 
 <div class="row g-4">
@@ -42,18 +57,12 @@
                     <dt class="col-sm-5">Chương</dt>
                     <dd class="col-sm-7">@(Model.Document.ChapterTitle ?? "Không gắn chương")</dd>
 
-                    <dt class="col-sm-5">Người upload</dt>
-                    <dd class="col-sm-7">@(Model.Document.UploadedByFullName ?? "Không xác định")</dd>
-
                     <dt class="col-sm-5">Trạng thái</dt>
                     <dd class="col-sm-7">
                         <span class="badge @GetStatusBadge(Model.Document.ProcessingStatus)">
                             @GetStatusLabel(Model.Document.ProcessingStatus)
                         </span>
                     </dd>
-
-                    <dt class="col-sm-5">Số đoạn</dt>
-                    <dd class="col-sm-7">@Model.Document.ChunkCount</dd>
 
                     <dt class="col-sm-5">Dung lượng</dt>
                     <dd class="col-sm-7">@FormatBytes(Model.Document.FileSizeBytes)</dd>
@@ -77,7 +86,7 @@
 
     <div class="col-lg-8">
         <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white fw-semibold">Nội dung đã chia đoạn</div>
+            <div class="card-header bg-white fw-semibold">Nội dung tài liệu</div>
             <div class="card-body">
                 @if (Model.Document.Chunks.Count == 0)
                 {
@@ -96,11 +105,7 @@
                                     <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
                                             data-bs-target="#collapse-@itemId" aria-expanded="false"
                                             aria-controls="collapse-@itemId">
-                                        Đoạn @chunk.ChunkIndex - @(chunk.TokenCount ?? 0) token ước tính
-                                        @if (!string.IsNullOrWhiteSpace(chunk.VectorId))
-                                        {
-                                            <span class="ms-2 small text-muted">VectorId: @chunk.VectorId</span>
-                                        }
+                                        Phần @chunk.ChunkIndex
                                     </button>
                                 </h2>
                                 <div id="collapse-@itemId" class="accordion-collapse collapse"
@@ -138,8 +143,9 @@
     {
         return status switch
         {
-            "Indexed" => "text-bg-success",
-            "Failed" => "text-bg-danger",
+            "Ready" or "Indexed" or "Completed" => "text-bg-success",
+            "Failed" or "Error" => "text-bg-danger",
+            "Pending" or "Processing" => "text-bg-info",
             _ => "text-bg-secondary"
         };
     }
@@ -148,10 +154,21 @@
     {
         return status switch
         {
-            "Indexed" => "Đã xử lý",
-            "Failed" => "Lỗi xử lý",
-            "Uploaded" => "Đã tải lên",
+            "Pending" or "Processing" => "Đang xử lý",
+            "Ready" or "Indexed" or "Completed" => "Sẵn sàng",
+            "Failed" or "Error" => "Lỗi xử lý",
+            "NotIndexed" or "Uploaded" => "Chưa xử lý",
             _ => status
         };
+    }
+
+    private static bool IsProcessingFailed(string status)
+    {
+        return status is "Failed" or "Error";
+    }
+
+    private static bool IsPdf(string fileExtension)
+    {
+        return string.Equals(fileExtension, ".pdf", StringComparison.OrdinalIgnoreCase);
     }
 }

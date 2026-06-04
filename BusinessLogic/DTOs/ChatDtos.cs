@@ -1,11 +1,15 @@
 namespace BusinessLogic.DTOs;
 
+// Scope chat mang cả phạm vi tài liệu và filter quyền của user hiện tại.
 public sealed record ChatScopeDto(
     int? SubjectId,
     int? ChapterId,
     int? DocumentId,
-    int? ConversationId);
+    int? ConversationId,
+    int? OwnerUserId,
+    int? ViewerUserId);
 
+// Option document cho UI chat biết tài liệu nào đã sẵn sàng hỏi đáp.
 public sealed record ChatDocumentOptionDto(
     int DocumentId,
     int SubjectId,
@@ -16,6 +20,7 @@ public sealed record ChatDocumentOptionDto(
     int ChunkCount,
     bool CanChat);
 
+// Citation trả về UI để hiển thị nguồn RAG tách khỏi nội dung answer.
 public sealed record ChatCitationDto(
     int DocumentId,
     long DocumentChunkId,
@@ -51,6 +56,7 @@ public sealed record ChatPageDto(
     int? CurrentDocumentId,
     bool HasIndexedDocuments);
 
+// DTO này là đầu vào chính của ChatService.AskAsync.
 public sealed record ChatAskDto(
     int UserId,
     int? ConversationId,
@@ -58,7 +64,9 @@ public sealed record ChatAskDto(
     int? ChapterId,
     int? DocumentId,
     string Question,
-    string WebRootPath);
+    string WebRootPath,
+    int? OwnerUserId,
+    int? ViewerUserId);
 
 public sealed record ChatAnswerDto(
     int ConversationId,

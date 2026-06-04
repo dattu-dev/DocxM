@@ -1,11 +1,12 @@
-using System.Security.Claims;
 using BusinessLogic.DTOs;
 using BusinessLogic.Services;
 using BusinessLogic.Validation;
+using BusinessObjects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Presentation.Models;
+using Presentation.Services;
 
 namespace Presentation.Controllers;
 
@@ -16,13 +17,16 @@ public sealed class ChatController : Controller
 
     private readonly IChatService _chatService;
     private readonly IWebHostEnvironment _environment;
+    private readonly ICurrentUserService _currentUser;
 
     public ChatController(
         IChatService chatService,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        ICurrentUserService currentUser)
     {
         _chatService = chatService;
         _environment = environment;
+        _currentUser = currentUser;
     }
 
     public async Task<IActionResult> Index(
@@ -49,7 +53,14 @@ public sealed class ChatController : Controller
         }
 
         ChatIndexViewModel viewModel = await BuildViewModelAsync(
-            new ChatScopeDto(NormalizeId(subjectId), NormalizeId(chapterId), NormalizeId(documentId), currentConversationId),
+            new ChatScopeDto(
+                NormalizeId(subjectId),
+                NormalizeId(chapterId),
+                NormalizeId(documentId),
+                currentConversationId,
+                // Scope gửi xuống service phải mang đúng ngữ cảnh role hiện tại.
+                GetOwnerFilterUserId(),
+                GetViewerFilterUserId()),
             cancellationToken);
 
         if (viewModel.ConversationId.HasValue)
@@ -81,7 +92,7 @@ public sealed class ChatController : Controller
 
         bool deleted = await _chatService.DeleteConversationAsync(
             conversationId,
-            GetCurrentUserId(),
+            _currentUser.UserId,
             cancellationToken);
 
         if (deleted && currentConversationId == conversationId)
@@ -98,6 +109,7 @@ public sealed class ChatController : Controller
         ChatIndexViewModel viewModel,
         CancellationToken cancellationToken)
     {
+        // Action này nhận câu hỏi từ UI và chuyển sang ChatService xử lý RAG.
         viewModel.SubjectId = NormalizeId(viewModel.SubjectId);
         viewModel.ChapterId = NormalizeId(viewModel.ChapterId);
         viewModel.DocumentId = NormalizeId(viewModel.DocumentId);
@@ -113,13 +125,16 @@ public sealed class ChatController : Controller
         {
             ChatAnswerDto answer = await _chatService.AskAsync(
                 new ChatAskDto(
-                    GetCurrentUserId(),
+                    _currentUser.UserId,
                     viewModel.ConversationId,
                     viewModel.SubjectId,
                     viewModel.ChapterId,
                     viewModel.DocumentId,
                     viewModel.Question,
-                    GetWebRootPath()),
+                    GetWebRootPath(),
+                    // Service/repository dùng hai filter này để chặn chat ngoài phạm vi quyền.
+                    GetOwnerFilterUserId(),
+                    GetViewerFilterUserId()),
                 cancellationToken);
 
             HttpContext.Session.SetInt32(CurrentConversationSessionKey, answer.ConversationId);
@@ -157,8 +172,14 @@ public sealed class ChatController : Controller
         CancellationToken cancellationToken)
     {
         ChatPageDto page = await _chatService.GetChatPageAsync(
-            GetCurrentUserId(),
-            new ChatScopeDto(viewModel.SubjectId, viewModel.ChapterId, viewModel.DocumentId, viewModel.ConversationId),
+            _currentUser.UserId,
+            new ChatScopeDto(
+                viewModel.SubjectId,
+                viewModel.ChapterId,
+                viewModel.DocumentId,
+                viewModel.ConversationId,
+                GetOwnerFilterUserId(),
+                GetViewerFilterUserId()),
             cancellationToken);
 
         HashSet<int> validSubjectIds = page.Subjects.Select(subject => subject.SubjectId).ToHashSet();
@@ -258,9 +279,10 @@ public sealed class ChatController : Controller
 
         string status = document.ProcessingStatus switch
         {
-            "Uploaded" => "chưa xử lý",
-            "Processing" => "đang xử lý",
-            "Failed" => "xử lý lỗi",
+            "Pending" or "Processing" => "Đang xử lý",
+            "Ready" or "Indexed" or "Completed" => "Sẵn sàng",
+            "Failed" or "Error" => "Lỗi xử lý",
+            "NotIndexed" or "Uploaded" => "Chưa xử lý",
             _ => document.ProcessingStatus
         };
 
@@ -274,16 +296,16 @@ public sealed class ChatController : Controller
             : _environment.WebRootPath;
     }
 
-    private int GetCurrentUserId()
+    private int? GetOwnerFilterUserId()
     {
-        string? userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        // Instructor chat với dữ liệu do mình sở hữu/upload.
+        return _currentUser.IsInstructor ? _currentUser.UserId : null;
+    }
 
-        if (!int.TryParse(userId, out int parsedUserId))
-        {
-            throw new InvalidOperationException("Không xác định được người dùng hiện tại.");
-        }
-
-        return parsedUserId;
+    private int? GetViewerFilterUserId()
+    {
+        // Student chat qua SubjectPermissions, không theo dữ liệu của Instructor.
+        return _currentUser.IsStudent ? _currentUser.UserId : null;
     }
 
     private void AddValidationErrors(BusinessValidationException exception)

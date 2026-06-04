@@ -2,6 +2,7 @@ namespace AIService.Options;
 
 public sealed class GeminiOptions
 {
+    // Chỉ khi Enabled=true và ApiKey có giá trị thì DI mới dùng Gemini thật.
     public bool Enabled { get; set; }
 
     public string ApiKey { get; set; } = string.Empty;
@@ -16,5 +17,6 @@ public sealed class GeminiOptions
 
     public double Temperature { get; set; } = 0.1;
 
+    // Không log giá trị ApiKey; property này chỉ kiểm tra trạng thái cấu hình.
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(ApiKey);
 }

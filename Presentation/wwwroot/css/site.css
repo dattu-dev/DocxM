@@ -34,19 +34,15 @@ body {
 }
 
 .documents-col-title {
-  width: 34%;
+  width: 36%;
 }
 
 .documents-col-subject {
-  width: 17%;
+  width: 22%;
 }
 
-.documents-col-user {
-  width: 12%;
-}
-
-.documents-col-count {
-  width: 7%;
+.documents-col-status {
+  width: 13%;
 }
 
 .documents-col-date {

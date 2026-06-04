@@ -27,6 +27,7 @@ public sealed class DocumentTextExtractor : IDocumentTextExtractor
         string fileExtension,
         CancellationToken cancellationToken = default)
     {
+        // Mỗi định dạng có parser riêng để tránh xử lý file nhị phân bằng string thô.
         string extension = NormalizeExtension(fileExtension);
 
         return extension switch

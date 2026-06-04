@@ -10,21 +10,25 @@ public interface IDocumentService
 
     Task<DocumentDetailsDto?> GetDocumentDetailsAsync(
         int documentId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<DocumentFileDto?> GetDocumentFileAsync(
         int documentId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SubjectOptionDto>> GetSubjectsAsync(
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ChapterOptionDto>> GetChaptersAsync(
         int? subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken = default);
 
     Task<DocumentUploadResultDto> UploadDocumentAsync(

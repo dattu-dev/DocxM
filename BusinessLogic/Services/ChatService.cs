@@ -4,10 +4,12 @@ using System.Text.RegularExpressions;
 using AIService.Models;
 using AIService.Services;
 using BusinessLogic.DTOs;
+using BusinessLogic.Options;
 using BusinessLogic.Validation;
 using BusinessObjects.Entities;
 using BusinessObjects.Enums;
 using DataAcessLayer.Repositories;
+using Microsoft.Extensions.Logging;
 
 namespace BusinessLogic.Services;
 
@@ -43,17 +45,23 @@ public sealed class ChatService : IChatService
     private readonly IEmbeddingService _embeddingService;
     private readonly IVectorStore _vectorStore;
     private readonly IAnswerGenerationService _answerGenerationService;
+    private readonly ILogger<ChatService> _logger;
+    private readonly RagDebugOptions _ragDebugOptions;
 
     public ChatService(
         IChatRepository chatRepository,
         IEmbeddingService embeddingService,
         IVectorStore vectorStore,
-        IAnswerGenerationService answerGenerationService)
+        IAnswerGenerationService answerGenerationService,
+        ILogger<ChatService> logger,
+        RagDebugOptions ragDebugOptions)
     {
         _chatRepository = chatRepository;
         _embeddingService = embeddingService;
         _vectorStore = vectorStore;
         _answerGenerationService = answerGenerationService;
+        _logger = logger;
+        _ragDebugOptions = ragDebugOptions;
     }
 
     public async Task<ChatPageDto> GetChatPageAsync(
@@ -61,7 +69,9 @@ public sealed class ChatService : IChatService
         ChatScopeDto scope,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<Subject> subjects = await _chatRepository.GetSubjectsAsync(userId, cancellationToken);
+        int? ownerUserId = scope.OwnerUserId;
+        int? viewerUserId = scope.ViewerUserId;
+        IReadOnlyList<Subject> subjects = await _chatRepository.GetSubjectsAsync(ownerUserId, viewerUserId, cancellationToken);
         ChatConversation? currentConversation = scope.ConversationId.HasValue
             ? await _chatRepository.GetConversationByIdAsync(scope.ConversationId.Value, userId, cancellationToken)
             : null;
@@ -74,17 +84,20 @@ public sealed class ChatService : IChatService
             : null;
 
         IReadOnlyList<Chapter> chapters = subjectId.HasValue
-            ? await _chatRepository.GetChaptersAsync(subjectId.Value, userId, cancellationToken)
+            ? await _chatRepository.GetChaptersAsync(subjectId.Value, ownerUserId, viewerUserId, cancellationToken)
             : Array.Empty<Chapter>();
         int? chapterId = chapters.Any(chapter => chapter.ChapterId == requestedChapterId)
             ? requestedChapterId
             : null;
 
         IReadOnlyList<Document> documents = subjectId.HasValue
-            ? await _chatRepository.GetDocumentsAsync(subjectId, chapterId, userId, cancellationToken)
+            ? await _chatRepository.GetDocumentsAsync(subjectId, chapterId, ownerUserId, viewerUserId, cancellationToken)
             : Array.Empty<Document>();
         int? documentId = documents.Any(document => document.DocumentId == requestedDocumentId)
             ? requestedDocumentId
+            : null;
+        currentConversation = IsConversationInScope(currentConversation, subjectId, chapterId, documentId)
+            ? currentConversation
             : null;
 
         IReadOnlyList<ChatMessage> messages = currentConversation is null
@@ -98,7 +111,8 @@ public sealed class ChatService : IChatService
         IReadOnlyList<Document> allIndexedDocuments = await _chatRepository.GetIndexedDocumentsAsync(
             null,
             null,
-            userId,
+            ownerUserId,
+            viewerUserId,
             cancellationToken);
         IReadOnlyList<ChatConversation> conversations = await _chatRepository.GetConversationsAsync(
             userId,
@@ -127,14 +141,18 @@ public sealed class ChatService : IChatService
         CancellationToken cancellationToken = default)
     {
         string question = ValidateQuestion(dto.Question);
+        int? ownerUserId = dto.OwnerUserId;
+        int? viewerUserId = dto.ViewerUserId;
 
-        Subject subject = await ValidateSubjectAsync(dto.SubjectId, dto.UserId, cancellationToken);
-        Chapter? chapter = await ValidateChapterAsync(dto.ChapterId, subject.SubjectId, dto.UserId, cancellationToken);
+        // Mọi câu hỏi phải được validate lại theo scope quyền hiện tại.
+        Subject subject = await ValidateSubjectAsync(dto.SubjectId, ownerUserId, viewerUserId, cancellationToken);
+        Chapter? chapter = await ValidateChapterAsync(dto.ChapterId, subject.SubjectId, ownerUserId, viewerUserId, cancellationToken);
         Document? selectedDocument = await ValidateDocumentAsync(
             dto.DocumentId,
             subject.SubjectId,
             chapter?.ChapterId,
-            dto.UserId,
+            ownerUserId,
+            viewerUserId,
             cancellationToken);
 
         IReadOnlyList<Document> candidateDocuments = selectedDocument is not null
@@ -142,7 +160,8 @@ public sealed class ChatService : IChatService
             : await _chatRepository.GetIndexedDocumentsAsync(
                 subject.SubjectId,
                 chapter?.ChapterId,
-                dto.UserId,
+                ownerUserId,
+                viewerUserId,
                 cancellationToken);
 
         if (candidateDocuments.Count == 0)
@@ -160,13 +179,14 @@ public sealed class ChatService : IChatService
         if (metadataAnswer is not null)
         {
             WriteRagDebug(
-                question,
+                dto,
                 intent,
-                rewrittenQuery,
                 Array.Empty<RankedChunk>(),
                 Array.Empty<RankedChunk>(),
-                "Metadata intent: không dùng vector search.",
-                metadataAnswer.Answer);
+                question.Length,
+                rewrittenQuery.Length,
+                0,
+                metadataAnswer.Answer.Length);
 
             return await SaveChatAnswerAsync(
                 dto,
@@ -184,10 +204,12 @@ public sealed class ChatService : IChatService
             rewrittenQuery,
             intent,
             candidateDocuments.Select(document => document.DocumentId).ToArray(),
-            dto.UserId,
+            ownerUserId,
+            viewerUserId,
             dto.WebRootPath,
             cancellationToken);
 
+        // Chỉ các chunk được chọn mới đi vào prompt và citation.
         IReadOnlyList<RankedChunk> selectedChunks = SelectContextChunks(intent, rankedChunks);
         IReadOnlyList<ChatCitationDto> citations = selectedChunks
             .Select(MapCitation)
@@ -198,16 +220,18 @@ public sealed class ChatService : IChatService
         string prompt = BuildPrompt(question, selectedChunks);
         string answer = selectedChunks.Count == 0
             ? "Tài liệu chưa có thông tin phù hợp."
+            // Nếu DI đang dùng GeminiAnswerGenerationService thì lời gọi này sẽ đi tới Gemini API.
             : await _answerGenerationService.GenerateAnswerAsync(prompt, cancellationToken);
 
         WriteRagDebug(
-            question,
+            dto,
             intent,
-            rewrittenQuery,
             rankedChunks,
             selectedChunks,
-            prompt,
-            answer);
+            question.Length,
+            rewrittenQuery.Length,
+            prompt.Length,
+            answer.Length);
 
         return await SaveChatAnswerAsync(
             dto,
@@ -277,6 +301,7 @@ public sealed class ChatService : IChatService
 
         foreach (ChatCitationDto citation in citations)
         {
+            // Citation lưu id tài liệu/chunk để UI hiển thị nguồn mà không cần lộ prompt.
             message.ChatCitations.Add(new ChatCitation
             {
                 DocumentId = citation.DocumentId,
@@ -484,12 +509,15 @@ public sealed class ChatService : IChatService
         string rewrittenQuery,
         ChatQuestionIntent intent,
         IReadOnlyCollection<int> documentIds,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         string webRootPath,
         CancellationToken cancellationToken)
     {
         string[] questionTerms = ExtractSearchTerms($"{question} {rewrittenQuery}");
         string[] keywordSearchTerms = BuildKeywordSearchTerms(question, rewrittenQuery, questionTerms, intent);
+        // Vector search chỉ nhận danh sách document ids đã được lọc quyền từ trước.
+        // Nếu DI đang dùng GeminiEmbeddingService thì lời gọi này sẽ đi tới Gemini API.
         float[] questionEmbedding = await _embeddingService.GenerateEmbeddingAsync(
             rewrittenQuery,
             EmbeddingTaskType.RetrievalQuery,
@@ -509,12 +537,14 @@ public sealed class ChatService : IChatService
 
         IReadOnlyList<DocumentChunk> vectorChunks = await _chatRepository.GetChunksByIdsAsync(
             vectorScores.Keys.ToArray(),
-            userId,
+            ownerUserId,
+            viewerUserId,
             cancellationToken);
 
         IReadOnlyList<DocumentChunk> keywordChunks = await _chatRepository.SearchChunksByKeywordsAsync(
             documentIds,
-            userId,
+            ownerUserId,
+            viewerUserId,
             keywordSearchTerms,
             MaxKeywordCandidateChunks,
             cancellationToken);
@@ -532,6 +562,7 @@ public sealed class ChatService : IChatService
         return rankedChunks;
     }
 
+    // Prompt RAG ghép câu hỏi và context tài liệu trước khi gửi sang answer service.
     private static string BuildPrompt(
         string question,
         IReadOnlyList<RankedChunk> chunks)
@@ -586,51 +617,47 @@ public sealed class ChatService : IChatService
             : normalizedContent[..MaxPromptChunkCharacters].Trim() + "...";
     }
 
-    private static void WriteRagDebug(
-        string question,
+    private void WriteRagDebug(
+        ChatAskDto dto,
         ChatQuestionIntent intent,
-        string rewrittenQuery,
         IReadOnlyList<RankedChunk> retrievedChunks,
         IReadOnlyList<RankedChunk> selectedChunks,
-        string finalContext,
-        string finalAnswer)
+        int questionLength,
+        int rewrittenQueryLength,
+        int promptLength,
+        int answerLength)
     {
-        var debug = new StringBuilder();
-        debug.AppendLine("[RAG DEBUG] Question:");
-        debug.AppendLine(question);
-        debug.AppendLine($"[RAG DEBUG] Detected intent: {intent}");
-        debug.AppendLine("[RAG DEBUG] Rewritten search query:");
-        debug.AppendLine(rewrittenQuery);
-        debug.AppendLine("[RAG DEBUG] Top chunks retrieved after hybrid rerank:");
-
-        for (int i = 0; i < retrievedChunks.Count; i++)
+        if (!_ragDebugOptions.Enabled || !_logger.IsEnabled(LogLevel.Debug))
         {
-            RankedChunk chunk = retrievedChunks[i];
-            debug.AppendLine(
-                $"#{i + 1} DocumentId={chunk.Chunk.DocumentId}, File={chunk.Chunk.Document.OriginalFileName}, Title={chunk.Chunk.Document.Title}, ChunkId={chunk.Chunk.DocumentChunkId}, ChunkIndex={chunk.Chunk.ChunkIndex}, " +
-                $"SectionTitle={chunk.Chunk.SectionTitle ?? "(none)"}, FinalScore={chunk.FinalScore:0.0000}, " +
-                $"LexicalScore={chunk.LexicalScore:0.0000}, VectorScore={chunk.VectorScore:0.0000}, NormalizedVectorScore={chunk.NormalizedVectorScore:0.0000}");
-            debug.AppendLine(BuildSnippet(chunk.Chunk.Content));
+            return;
         }
 
-        debug.AppendLine("[RAG DEBUG] Context chunks finally sent to AI:");
+        // Khi bật debug, chỉ log metadata an toàn, không log question/prompt/context/answer.
+        _logger.LogDebug(
+            "RAG debug metadata: UserId={UserId}, ConversationId={ConversationId}, SubjectId={SubjectId}, ChapterId={ChapterId}, DocumentId={DocumentId}, Intent={Intent}, RetrievedChunkCount={RetrievedChunkCount}, SelectedChunkCount={SelectedChunkCount}, QuestionLength={QuestionLength}, RewrittenQueryLength={RewrittenQueryLength}, PromptLength={PromptLength}, AnswerLength={AnswerLength}, AnswerProvider={AnswerProvider}, RetrievedChunks={RetrievedChunks}, SelectedChunks={SelectedChunks}",
+            dto.UserId,
+            dto.ConversationId,
+            dto.SubjectId,
+            dto.ChapterId,
+            dto.DocumentId,
+            intent,
+            retrievedChunks.Count,
+            selectedChunks.Count,
+            questionLength,
+            rewrittenQueryLength,
+            promptLength,
+            answerLength,
+            _answerGenerationService.GetType().Name,
+            BuildChunkDebugSummary(retrievedChunks),
+            BuildChunkDebugSummary(selectedChunks));
+    }
 
-        for (int i = 0; i < selectedChunks.Count; i++)
-        {
-            RankedChunk chunk = selectedChunks[i];
-            debug.AppendLine(
-                $"#{i + 1} DocumentId={chunk.Chunk.DocumentId}, File={chunk.Chunk.Document.OriginalFileName}, Title={chunk.Chunk.Document.Title}, ChunkId={chunk.Chunk.DocumentChunkId}, ChunkIndex={chunk.Chunk.ChunkIndex}, " +
-                $"FinalScore={chunk.FinalScore:0.0000}");
-            debug.AppendLine(BuildSnippet(chunk.Chunk.Content));
-        }
-
-        debug.AppendLine("[RAG DEBUG] Final context/prompt sent to AI:");
-        debug.AppendLine(finalContext);
-        debug.AppendLine("[RAG DEBUG] Final answer:");
-        debug.AppendLine(finalAnswer);
-
-        Console.WriteLine(debug.ToString());
-        System.Diagnostics.Debug.WriteLine(debug.ToString());
+    private static string BuildChunkDebugSummary(IReadOnlyList<RankedChunk> chunks)
+    {
+        return string.Join(
+            "; ",
+            chunks.Select((chunk, index) =>
+                $"rank={index + 1},documentId={chunk.Chunk.DocumentId},chunkId={chunk.Chunk.DocumentChunkId},chunkIndex={chunk.Chunk.ChunkIndex},finalScore={chunk.FinalScore:0.0000},lexicalScore={chunk.LexicalScore:0.0000},vectorScore={chunk.VectorScore:0.0000},normalizedVectorScore={chunk.NormalizedVectorScore:0.0000}"));
     }
 
     private async Task<ChatConversation> GetOrCreateConversationAsync(
@@ -649,7 +676,13 @@ public sealed class ChatService : IChatService
                 userId,
                 cancellationToken);
 
-            if (existingConversation is not null)
+            // Conversation cũ chỉ được reuse nếu scope vẫn khớp sau khi quyền hiện tại được kiểm tra.
+            if (existingConversation is not null &&
+                IsConversationInScope(
+                    existingConversation,
+                    subject.SubjectId,
+                    chapter?.ChapterId,
+                    document?.DocumentId))
             {
                 return existingConversation;
             }
@@ -673,7 +706,8 @@ public sealed class ChatService : IChatService
 
     private async Task<Subject> ValidateSubjectAsync(
         int? subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken)
     {
         if (!subjectId.HasValue || subjectId.Value <= 0)
@@ -684,13 +718,13 @@ public sealed class ChatService : IChatService
             ]);
         }
 
-        Subject? subject = await _chatRepository.GetSubjectAsync(subjectId.Value, userId, cancellationToken);
+        Subject? subject = await _chatRepository.GetSubjectAsync(subjectId.Value, ownerUserId, viewerUserId, cancellationToken);
 
         if (subject is null)
         {
             throw new BusinessValidationException(
             [
-                new ValidationError(nameof(ChatAskDto.SubjectId), "Môn học không tồn tại hoặc không thuộc tài khoản của bạn.")
+                new ValidationError(nameof(ChatAskDto.SubjectId), "Môn học không tồn tại hoặc bạn không có quyền truy cập.")
             ]);
         }
 
@@ -700,7 +734,8 @@ public sealed class ChatService : IChatService
     private async Task<Chapter?> ValidateChapterAsync(
         int? chapterId,
         int subjectId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken)
     {
         if (!chapterId.HasValue || chapterId.Value <= 0)
@@ -708,7 +743,7 @@ public sealed class ChatService : IChatService
             return null;
         }
 
-        Chapter? chapter = await _chatRepository.GetChapterAsync(chapterId.Value, userId, cancellationToken);
+        Chapter? chapter = await _chatRepository.GetChapterAsync(chapterId.Value, ownerUserId, viewerUserId, cancellationToken);
 
         if (chapter is null || chapter.SubjectId != subjectId)
         {
@@ -725,7 +760,8 @@ public sealed class ChatService : IChatService
         int? documentId,
         int subjectId,
         int? chapterId,
-        int userId,
+        int? ownerUserId,
+        int? viewerUserId,
         CancellationToken cancellationToken)
     {
         if (!documentId.HasValue || documentId.Value <= 0)
@@ -733,7 +769,7 @@ public sealed class ChatService : IChatService
             return null;
         }
 
-        Document? document = await _chatRepository.GetDocumentAsync(documentId.Value, userId, cancellationToken);
+        Document? document = await _chatRepository.GetDocumentAsync(documentId.Value, ownerUserId, viewerUserId, cancellationToken);
 
         if (document is null ||
             document.SubjectId != subjectId ||
@@ -1069,6 +1105,18 @@ public sealed class ChatService : IChatService
         }
 
         return chapter is null ? subject.Name : $"{subject.Name} / {chapter.Title}";
+    }
+
+    private static bool IsConversationInScope(
+        ChatConversation? conversation,
+        int? subjectId,
+        int? chapterId,
+        int? documentId)
+    {
+        return conversation is not null &&
+               conversation.SubjectId == subjectId &&
+               conversation.ChapterId == chapterId &&
+               conversation.DocumentId == documentId;
     }
 
     private sealed record RankedChunk(

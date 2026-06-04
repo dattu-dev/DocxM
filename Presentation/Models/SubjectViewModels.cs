@@ -26,3 +26,18 @@ public sealed class SubjectFormViewModel
     [Display(Name = "Mô tả")]
     public string? Description { get; set; }
 }
+
+public sealed class SubjectPermissionsViewModel
+{
+    public int SubjectId { get; set; }
+
+    public string SubjectName { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "Vui lòng nhập email sinh viên.")]
+    [EmailAddress(ErrorMessage = "Email không hợp lệ.")]
+    [StringLength(256, ErrorMessage = "Email không được vượt quá 256 ký tự.")]
+    [Display(Name = "Email sinh viên")]
+    public string StudentEmail { get; set; } = string.Empty;
+
+    public IReadOnlyList<SubjectPermissionListItemDto> Students { get; set; } = Array.Empty<SubjectPermissionListItemDto>();
+}

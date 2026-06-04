@@ -20,4 +20,7 @@ public partial class Subject
     public virtual ICollection<Chapter> Chapters { get; set; } = new List<Chapter>();
 
     public virtual ICollection<Document> Documents { get; set; } = new List<Document>();
+
+    // Danh sách quyền giúp Student truy cập Subject mà không sở hữu Subject.
+    public virtual ICollection<SubjectPermission> SubjectPermissions { get; set; } = new List<SubjectPermission>();
 }

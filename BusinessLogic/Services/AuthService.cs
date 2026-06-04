@@ -1,6 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using BusinessLogic.DTOs;
 using BusinessLogic.Validation;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAcessLayer.Repositories;
 
@@ -32,6 +33,8 @@ public sealed class AuthService : IAuthService
             Email = register.Email.Trim(),
             NormalizedEmail = Normalize(register.Email),
             FullName = register.FullName.Trim(),
+            // User mới luôn là Student để tránh tự nâng quyền Instructor từ form đăng ký.
+            Role = UserRoles.Student,
             PasswordHash = _passwordHasher.HashPassword(register.Password),
             IsActive = true,
             CreatedAt = DateTime.UtcNow
@@ -150,12 +153,32 @@ public sealed class AuthService : IAuthService
         return value.Trim().ToUpperInvariant();
     }
 
+    private static string NormalizeRole(string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return UserRoles.Student;
+        }
+
+        string trimmedRole = role.Trim();
+
+        if (string.Equals(trimmedRole, UserRoles.Instructor, StringComparison.OrdinalIgnoreCase))
+        {
+            return UserRoles.Instructor;
+        }
+
+        return string.Equals(trimmedRole, UserRoles.Student, StringComparison.OrdinalIgnoreCase)
+            ? UserRoles.Student
+            : trimmedRole;
+    }
+
     private static AuthenticatedUserDto MapAuthenticatedUser(AppUser user)
     {
         return new AuthenticatedUserDto(
             user.UserId,
             user.UserName,
             user.Email,
-            user.FullName);
+            user.FullName,
+            NormalizeRole(user.Role));
     }
 }

@@ -7,9 +7,12 @@
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
     <div>
         <h1 class="display-6 mb-0">Quản lý môn học</h1>
-        <p class="text-muted mb-0">Mỗi người dùng chỉ nhìn thấy môn học do chính mình tạo.</p>
+        <p class="text-muted mb-0">Quản lý môn học, tài liệu và hỏi đáp với chatbot RAG.</p>
     </div>
-    <a class="btn btn-primary" asp-action="Create">Tạo môn học</a>
+    @if (User.IsInRole(UserRoles.Instructor))
+    {
+        <a class="btn btn-primary" asp-action="Create">Tạo môn học</a>
+    }
 </div>
 
 @if (TempData["SuccessMessage"] is string successMessage)
@@ -32,15 +35,18 @@
                     <th>Số chương</th>
                     <th>Số tài liệu</th>
                     <th>Ngày tạo</th>
-                    <th class="text-end">Thao tác</th>
+                    @if (User.IsInRole(UserRoles.Instructor))
+                    {
+                        <th class="text-end">Thao tác</th>
+                    }
                 </tr>
             </thead>
             <tbody>
             @if (Model.Subjects.Count == 0)
             {
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-5">
-                        Chưa có môn học nào. Hãy tạo môn học đầu tiên trước khi tải tài liệu lên.
+                    <td colspan="@(User.IsInRole(UserRoles.Instructor) ? 6 : 5)" class="text-center text-muted py-5">
+                        Chưa có môn học nào.
                     </td>
                 </tr>
             }
@@ -49,21 +55,27 @@
                 foreach (var subject in Model.Subjects)
                 {
                     <tr>
-                        <td class="fw-semibold">@subject.Name</td>
+                        <td class="fw-semibold">
+                            <a class="text-decoration-none" asp-action="Details" asp-route-id="@subject.SubjectId">@subject.Name</a>
+                        </td>
                         <td>@(subject.Description ?? "Chưa có mô tả")</td>
                         <td>@subject.ChapterCount</td>
                         <td>@subject.DocumentCount</td>
                         <td>@subject.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
-                        <td class="text-end">
-                            <div class="d-inline-flex gap-2">
-                                <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@subject.SubjectId">Chi tiết</a>
-                                <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@subject.SubjectId">Sửa</a>
-                                <form asp-action="Delete" asp-route-id="@subject.SubjectId" method="post"
-                                      onsubmit="return confirm('Xóa môn học này? Chỉ xóa được khi môn học không còn chương hoặc tài liệu.');">
-                                    <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
-                                </form>
-                            </div>
-                        </td>
+                        @if (User.IsInRole(UserRoles.Instructor))
+                        {
+                            <td class="text-end">
+                                <div class="d-inline-flex gap-2">
+                                    <a class="btn btn-sm btn-outline-primary" asp-action="Details" asp-route-id="@subject.SubjectId">Chi tiết</a>
+                                    <a class="btn btn-sm btn-outline-primary" asp-action="Permissions" asp-route-id="@subject.SubjectId">Sinh viên</a>
+                                    <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@subject.SubjectId">Sửa</a>
+                                    <form asp-action="Delete" asp-route-id="@subject.SubjectId" method="post"
+                                          onsubmit="return confirm('Xóa môn học này? Chỉ xóa được khi môn học không còn chương hoặc tài liệu.');">
+                                        <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
+                                    </form>
+                                </div>
+                            </td>
+                        }
                     </tr>
                 }
             }

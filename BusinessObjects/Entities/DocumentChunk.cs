@@ -17,6 +17,7 @@ public partial class DocumentChunk
 
     public int? PageNumber { get; set; }
 
+    // SectionTitle giữ heading gần nhất để chatbot trả lời đúng ngữ cảnh hơn.
     public string? SectionTitle { get; set; }
 
     public DateTime CreatedAt { get; set; }

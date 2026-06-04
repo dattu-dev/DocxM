@@ -25,9 +25,12 @@
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Document" asp-action="Index">Tài liệu</a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Document" asp-action="Create">Tải lên</a>
-                        </li>
+                        @if (User.IsInRole(UserRoles.Instructor))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-area="" asp-controller="Document" asp-action="Create">Tải lên</a>
+                            </li>
+                        }
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Chat" asp-action="Index">Chatbot</a>
                         </li>

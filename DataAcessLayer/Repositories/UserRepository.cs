@@ -22,6 +22,7 @@ public sealed class UserRepository : IUserRepository
         string userNameOrEmail,
         CancellationToken cancellationToken = default)
     {
+        // Đăng nhập dùng giá trị normalized để username/email không phụ thuộc chữ hoa thường.
         string normalizedValue = Normalize(userNameOrEmail);
 
         return BuildUserQuery()
